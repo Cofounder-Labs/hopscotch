@@ -123,17 +123,19 @@ func findScreen(for rect: CGRect) -> NSScreen? {
 }
 
 class OverlayManager: ObservableObject {
-    // Use an optional to track our window
-    private var windowRef: NSWindow?
+    // Use an optional to track our temporary window
+    private var temporaryWindowRef: NSWindow?
+    // Dictionary to hold persistent windows for observed regions
+    private var persistentWindows: [String: NSWindow] = [:]
     
-    // Use a dispatch work item we can cancel if needed
+    // Use a dispatch work item we can cancel if needed (only for temporary window)
     private var cleanupTask: DispatchWorkItem?
     
     // No Core Animation, just plain NSView drawing
     deinit {
         // Make sure we clean up when this object is deallocated
         cancelScheduledCleanup()
-        closeWindow()
+        closeTemporaryWindow()
     }
     
     // Basic annotation drawing with safer defaults
@@ -262,23 +264,36 @@ class OverlayManager: ObservableObject {
         }
     }
     
-    // Absolute minimal, safest drawing function
-    private func justDrawRectangle(screen targetScreen: NSScreen, x: CGFloat, y: CGFloat, width: CGFloat, height: CGFloat) {
+    // Absolute minimal, safest drawing function - now handles persistent windows
+    internal func justDrawRectangle(screen targetScreen: NSScreen, x: CGFloat, y: CGFloat, width: CGFloat, height: CGFloat, 
+                                   id: String? = nil, persistent: Bool = false, 
+                                   strokeColor: NSColor = .green, fillColor: NSColor = .green.withAlphaComponent(0.3)) {
         // Sanity check for main thread
         if !Thread.isMainThread {
              print("[justDrawRectangle] Warning: Not on main thread. Dispatching asynchronously.")
             DispatchQueue.main.async {
-                self.justDrawRectangle(screen: targetScreen, x: x, y: y, width: width, height: height)
+                self.justDrawRectangle(screen: targetScreen, x: x, y: y, width: width, height: height, 
+                                       id: id, persistent: persistent, strokeColor: strokeColor, fillColor: fillColor)
             }
             return
         }
-        print("[justDrawRectangle] Drawing on screen: \(targetScreen.localizedName) at global coords: (\(x), \(y)), Size: (\(width), \(height))")
+        let mode = persistent ? "persistent (id: \(id ?? "nil"))" : "temporary"
+        print("[justDrawRectangle] Drawing \(mode) on screen: \(targetScreen.localizedName) at global coords: (\(x), \(y)), Size: (\(width), \(height))")
         
-        // First close any existing window
-        closeWindow()
+        // Close ONLY the temporary window if drawing a new temporary one
+        if !persistent {
+            closeTemporaryWindow()
+        } else if let regionId = id, persistentWindows[regionId] != nil {
+            // If drawing persistent and ID already exists, remove the old one first
+            print("[justDrawRectangle] Persistent window with ID \(regionId) already exists. Closing old one.")
+            closePersistentWindow(id: regionId)
+        }
         
         // Use the passed-in target screen
         print("[justDrawRectangle] Using target screen frame (global): \(targetScreen.frame)")
+        
+        // First close any existing window
+        closeTemporaryWindow()
         
         // Create a borderless window using the TARGET screen's frame
         let newWindow = NSWindow(
@@ -309,8 +324,11 @@ class OverlayManager: ObservableObject {
         let rectangleForView = CGRect(x: viewX, y: viewY, width: width, height: height)
         print("[justDrawRectangle] Creating RectangleView with window frame origin: \(targetScreen.frame.origin), size: \(targetScreen.frame.size). Rectangle frame relative to window: \(rectangleForView)")
         
-        // Create the view with a frame size matching the window (target screen)
-        let customView = RectangleView(frame: NSRect(origin: .zero, size: targetScreen.frame.size), rectangleFrame: rectangleForView)
+        // Create the view with a frame size matching the window (target screen) and specified colors
+        let customView = RectangleView(frame: NSRect(origin: .zero, size: targetScreen.frame.size), 
+                                       rectangleFrame: rectangleForView, 
+                                       strokeColor: strokeColor, 
+                                       fillColor: fillColor)
         
         // Set the content view
         newWindow.contentView = customView
@@ -318,15 +336,144 @@ class OverlayManager: ObservableObject {
         // Show the window
         newWindow.orderFrontRegardless()
         
-        // Store the reference
-        self.windowRef = newWindow
+        // Store the reference & handle cleanup
+        if persistent, let regionId = id {
+            print("[justDrawRectangle] Storing persistent window reference for ID: \(regionId)")
+            persistentWindows[regionId] = newWindow
+            // DO NOT schedule cleanup for persistent windows
+        } else {
+            // Assume temporary if not persistent or no ID
+            print("[justDrawRectangle] Storing temporary window reference.")
+            self.temporaryWindowRef = newWindow
+            // Schedule cleanup ONLY for temporary windows
+            scheduleCleanup(delay: 2.0)
+        }
         
-        // Schedule cleanup after 2 seconds
-        scheduleCleanup(delay: 2.0)
-        
-        // Log success
+        // Log success (original status)
         print("{\"status\":\"drawn\", \"ts\":\\(Int(Date().timeIntervalSince1970 * 1000))}") 
-        print("[justDrawRectangle] Window created and scheduled for cleanup.")
+        print("[justDrawRectangle] Window created. Mode: \(mode).")
+    }
+    
+    // Draws a PERSISTENT centered annotation relative to target app and returns details
+    func observeAnnotation(targetBundleID: String, width: CGFloat, height: CGFloat, 
+                           bypassFocusCheck: Bool, activateTargetApp: Bool, 
+                           completion: @escaping (_ success: Bool, _ regionId: String?, _ observedRect: CGRect?, _ onScreen: NSScreen?) -> Void) {
+                           
+        // Ensure we're on the main thread
+        guard Thread.isMainThread else {
+            print("[observeAnnotation] Warning: Not on main thread. Dispatching asynchronously.")
+            DispatchQueue.main.async {
+                self.observeAnnotation(targetBundleID: targetBundleID, width: width, height: height, 
+                                     bypassFocusCheck: bypassFocusCheck, activateTargetApp: activateTargetApp, 
+                                     completion: completion)
+            }
+            return
+        }
+        print("[observeAnnotation] Starting observe annotation. Target: \(targetBundleID), Activate: \(activateTargetApp), Bypass Focus: \(bypassFocusCheck), Size: (\(width), \(height))")
+        
+        // Generate ID upfront for this observation region
+        let regionId = UUID().uuidString
+
+        // --- Always check Accessibility Permissions --- 
+        print("[observeAnnotation] Checking Accessibility Permissions.")
+        if !checkAccessibilityPermissions() {
+            print("[observeAnnotation] Error: Accessibility permissions denied or prompt required.")
+            print("Please grant permissions in System Settings > Privacy & Security > Accessibility.")
+             completion(false, nil, nil, nil)
+             return
+         } else {
+            print("[observeAnnotation] Accessibility permissions granted.")
+         }
+
+        // --- Define the core drawing logic (modified from drawAnnotation) --- 
+        let performRelativeObserveDraw = { [weak self] in
+            guard let self = self else { 
+                print("[performRelativeObserveDraw] Error: Self is nil.")
+                completion(false, nil, nil, nil)
+                return
+            }
+            
+            print("[performRelativeObserveDraw] Attempting to get window frame for \(targetBundleID).")
+            if let windowFrame = getWindowFrame(for: targetBundleID) {
+                print("[performRelativeObserveDraw] Finding screen for window frame: \(windowFrame)")
+                guard let targetScreen = findScreen(for: windowFrame) else {
+                    print("[performRelativeObserveDraw] Error: findScreen unexpectedly returned nil.") 
+                    completion(false, nil, nil, nil)
+                    return
+                }
+                print("[performRelativeObserveDraw] Target screen identified: \(targetScreen.localizedName), Frame (global): \(targetScreen.frame)")
+
+                print("[performRelativeObserveDraw] Successfully got window frame (global): \(windowFrame).")
+                
+                // Calculate centered absolute coordinates (global)
+                let centerAbsoluteX = windowFrame.origin.x + (windowFrame.width / 2)
+                let centerAbsoluteY = windowFrame.origin.y + (windowFrame.height / 2)
+                let absoluteX = centerAbsoluteX - (width / 2)
+                let absoluteY = centerAbsoluteY - (height / 2)
+                let calculatedRect = CGRect(x: absoluteX, y: absoluteY, width: width, height: height)
+                print("[performRelativeObserveDraw] Calculated centered absolute rect (global): \(calculatedRect)")
+                
+                // Check bounds against the TARGET screen's global frame
+                let screenFrame = targetScreen.frame 
+                print("[performRelativeObserveDraw] Target screen frame (global): \(screenFrame). Calculated target rect (global): \(calculatedRect)")
+                
+                if !calculatedRect.intersects(screenFrame) {
+                     print("[performRelativeObserveDraw] Error: Calculated rectangle does not intersect target screen frame. Not drawing.")
+                     completion(false, nil, nil, nil)
+                     return
+                }
+
+                print("[performRelativeObserveDraw] Calculated rectangle intersects target screen. Drawing persistent blue box...")
+                // Draw persistent blue box using the calculated details
+                self.justDrawRectangle(
+                    screen: targetScreen, x: absoluteX, y: absoluteY, width: width, height: height, 
+                    id: regionId, 
+                    persistent: true, 
+                    strokeColor: .systemBlue, 
+                    fillColor: .systemBlue.withAlphaComponent(0.15)
+                )
+                // Report success via completion handler
+                completion(true, regionId, calculatedRect, targetScreen)
+                
+            } else {
+                print("[performRelativeObserveDraw] Error: Failed to get window frame for \(targetBundleID). Cannot draw/observe annotation.")
+                completion(false, nil, nil, nil)
+            }
+        }
+
+        // --- Execute based on activateTargetApp --- 
+        if activateTargetApp {
+            print("[observeAnnotation] Activate flag is true. Finding and activating target app \(targetBundleID).")
+            guard let targetApp = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == targetBundleID }) else {
+                 print("[observeAnnotation] Error: Target app \(targetBundleID) not found for activation.")
+                 completion(false, nil, nil, nil)
+                 return
+            }
+            targetApp.activate(options: .activateIgnoringOtherApps)
+            
+            print("[observeAnnotation] Scheduling relative observe draw after 0.5s delay for activation.")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                print("[observeAnnotation] Activation delay complete. Performing relative observe draw.")
+                performRelativeObserveDraw()
+            }
+        } else {
+             print("[observeAnnotation] Activate flag is false. Proceeding with checks and relative observe draw.")
+             if !bypassFocusCheck {
+                 print("[observeAnnotation] Checking if target app \(targetBundleID) is frontmost (bypassFocusCheck is false).")
+                 guard let frontmostApp = NSWorkspace.shared.frontmostApplication,
+                       frontmostApp.bundleIdentifier == targetBundleID else {
+                     print("[observeAnnotation] Error: Target app \(targetBundleID) is not frontmost. Not drawing/observing.")
+                     completion(false, nil, nil, nil)
+                     return
+                 }
+                 print("[observeAnnotation] Target app \(targetBundleID) is frontmost.")
+             } else {
+                 print("[observeAnnotation] Skipping frontmost app check because bypassFocusCheck is true.")
+             }
+
+             print("[observeAnnotation] Performing relative observe draw immediately.")
+             performRelativeObserveDraw()
+        }
     }
     
     // Schedule cleanup with the ability to cancel it
@@ -337,7 +484,7 @@ class OverlayManager: ObservableObject {
         // Create a new cleanup task
         let task = DispatchWorkItem { [weak self] in
             print("[scheduleCleanup] Cleanup task executing.")
-            self?.closeWindow()
+            self?.closeTemporaryWindow()
         }
         
         // Store the task so we can cancel it if needed
@@ -357,38 +504,60 @@ class OverlayManager: ObservableObject {
         }
     }
     
-    // Close the window safely
-    private func closeWindow() {
+    // Close the temporary window safely
+    private func closeTemporaryWindow() {
         // Make sure we're on the main thread
         if !Thread.isMainThread {
-            print("[closeWindow] Warning: Not on main thread. Dispatching asynchronously.")
+            print("[closeTemporaryWindow] Warning: Not on main thread. Dispatching asynchronously.")
             DispatchQueue.main.async {
-                self.closeWindow()
+                self.closeTemporaryWindow()
             }
             return
         }
-        
+
         // Check if we have a window reference *before* nilling it
-        if let windowToClose = windowRef {
-             print("[closeWindow] Preparing to close window.")
+        if let windowToClose = temporaryWindowRef {
+             print("[closeTemporaryWindow] Preparing to close temporary window.")
              // Set reference to nil FIRST to prevent concurrent close attempts
-             self.windowRef = nil
+             self.temporaryWindowRef = nil
 
              // Explicitly remove from screen before closing
-             print("[closeWindow] Ordering window out.")
+             print("[closeTemporaryWindow] Ordering window out.")
              windowToClose.orderOut(nil) 
 
              // Optional: Explicitly remove the content view before closing, might help cleanup
              windowToClose.contentView = nil
-             print("[closeWindow] Closing window.")
+             print("[closeTemporaryWindow] Closing temporary window.")
              // Now close the window instance we captured
              windowToClose.close()
         } else {
-             // print("[closeWindow] No window reference to close.")
+             // print("[closeTemporaryWindow] No temporary window reference to close.")
         }
     }
     
-    // Clean up everything
+    // Close a specific persistent window
+    private func closePersistentWindow(id: String) {
+        if !Thread.isMainThread {
+            print("[closePersistentWindow] Warning: Not on main thread. Dispatching asynchronously.")
+            DispatchQueue.main.async {
+                self.closePersistentWindow(id: id)
+            }
+            return
+        }
+        
+        print("[closePersistentWindow] Attempting to close persistent window with ID: \(id)")
+        if let windowToClose = persistentWindows.removeValue(forKey: id) { // Remove from dict
+            print("[closePersistentWindow] Ordering window out.")
+            windowToClose.orderOut(nil)
+            windowToClose.contentView = nil
+            print("[closePersistentWindow] Closing window.")
+            windowToClose.close()
+        } else {
+            print("[closePersistentWindow] No persistent window found with ID: \(id)")
+        }
+    }
+
+    // Clean up everything (temporary window, persistent windows, timer)
     private func cleanupEverything() {
         // Make sure we're on the main thread
         if !Thread.isMainThread {
@@ -399,11 +568,18 @@ class OverlayManager: ObservableObject {
             return
         }
          print("[cleanupEverything] Cleaning up overlays and timers.")
-        // Cancel any scheduled cleanup
+         
+        // Cancel any scheduled cleanup for temporary window
         cancelScheduledCleanup()
+        // Close the temporary window
+        closeTemporaryWindow()
         
-        // Close the window
-        closeWindow()
+        // Close all persistent windows
+        let persistentIds = Array(persistentWindows.keys)
+        print("[cleanupEverything] Closing \(persistentIds.count) persistent windows.")
+        for id in persistentIds {
+            closePersistentWindow(id: id)
+        }
     }
     
     // Public cleanup method
@@ -416,55 +592,61 @@ class OverlayManager: ObservableObject {
 // Custom NSView subclass that draws a rectangle with no Core Animation
 class RectangleView: NSView {
     private var rectangleFrame: CGRect
-    
-    init(frame: CGRect, rectangleFrame: CGRect) {
+    private var strokeColor: NSColor
+    private var fillColor: NSColor
+    private var lineWidth: CGFloat
+
+    init(frame: CGRect, rectangleFrame: CGRect, strokeColor: NSColor = .green, fillColor: NSColor = .green.withAlphaComponent(0.3), lineWidth: CGFloat = 4.0) {
         self.rectangleFrame = rectangleFrame
+        self.strokeColor = strokeColor
+        self.fillColor = fillColor
+        self.lineWidth = lineWidth
         super.init(frame: frame)
-        print("[RectangleView init] Initialized with frame: \(frame), rectangle: \(rectangleFrame)")
+        print("[RectangleView init] Initialized with frame: \(frame), rectangle: \(rectangleFrame), stroke: \(strokeColor), fill: \(fillColor)")
         // Make the view layer-backed for better rendering
         self.wantsLayer = true
-        self.layer?.backgroundColor = NSColor.clear.cgColor
+        self.layer?.backgroundColor = NSColor.clear.cgColor // Window is clear, view background too
     }
-    
+
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented") // Make explicit that coder init is not supported
     }
-    
+
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
-        print("[RectangleView draw] Drawing rectangleFrame: \(rectangleFrame) within dirtyRect: \(dirtyRect)")
-        
+        print("[RectangleView draw] Drawing rectangleFrame: \(rectangleFrame) with stroke: \(strokeColor), fill: \(fillColor) within dirtyRect: \(dirtyRect)")
+
         // Get the current graphics context
         guard let context = NSGraphicsContext.current?.cgContext else { 
             print("[RectangleView draw] Error: Failed to get graphics context.")
             return 
         }
-        
-        // Set up the rectangle fill color (semi-transparent green per PRD)
-        context.setFillColor(NSColor.green.withAlphaComponent(0.3).cgColor)
-        
+
+        // Set up the rectangle fill color
+        context.setFillColor(fillColor.cgColor)
+
         // Set up the stroke color and width
-        context.setStrokeColor(NSColor.green.cgColor)
-        context.setLineWidth(4.0)
-        
+        context.setStrokeColor(strokeColor.cgColor)
+        context.setLineWidth(lineWidth)
+
         // Use bezier path for rounded corners
         let path = NSBezierPath(roundedRect: rectangleFrame, xRadius: 4, yRadius: 4)
-        
+
         // Create shadow
         let shadow = NSShadow()
         shadow.shadowColor = NSColor.black.withAlphaComponent(0.4)
         shadow.shadowBlurRadius = 5
         shadow.shadowOffset = NSSize(width: 2, height: -2)
         shadow.set()
-        
+
         // Draw with path
-        NSColor.green.withAlphaComponent(0.3).setFill()
-        NSColor.green.setStroke()
+        fillColor.setFill()
+        strokeColor.setStroke()
         path.fill()
         path.stroke()
         print("[RectangleView draw] Finished drawing.")
     }
-    
+
     // Ensure we use flipped coordinates - THIS IS CRITICAL for NSView drawing
     override var isFlipped: Bool {
         // print("[RectangleView] isFlipped called, returning true.") // Can be noisy, uncomment if needed

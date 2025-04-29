@@ -234,15 +234,15 @@ struct PreferencesView: View {
                             .fixedSize(horizontal: false, vertical: true)
                         
                         Button(action: {
-                            overlayController.activateMode(.regionSelect)
-                            currentMode = .regionSelect
+                            // Activate Observe Mode using the coordinates
+                            activateObserveMode()
                         }) {
                             Text("Monitor Region")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(.green)
-                        .disabled(currentMode == .regionSelect)
+                        // .disabled(currentMode == .regionSelect) // Let user define multiple regions if needed
                         .padding(.vertical, 8)
                     }
                     .padding(.bottom, 12)
@@ -295,6 +295,35 @@ struct PreferencesView: View {
                     currentMode = .drawing
                 }
             }
+        }
+    }
+    
+    private func activateObserveMode() {
+        // Only need width and height for centered observation
+        guard let width = Double(targetWidth),
+              let height = Double(targetHeight) else {
+            print("[PreferencesView] Error: Invalid width/height input for observe mode.")
+            return
+        }
+        
+        // Ensure a target app is selected
+        guard !targetBundleID.isEmpty else {
+            print("[PreferencesView] Error: No target application selected.")
+            // Maybe show an alert
+            return
+        }
+        
+        print("[PreferencesView] Activating observe mode for target: \(targetBundleID) with size (\(width), \(height)). ActivateApp: \(activateApp), BypassFocus: \(bypassFocusCheck)")
+        
+        // Call the controller method
+        DispatchQueue.main.async { [self] in
+            overlayController.startObservingRegion(
+                targetBundleID: targetBundleID, 
+                width: width, 
+                height: height,
+                bypassFocusCheck: bypassFocusCheck, // Use state variable 
+                activateTargetApp: activateApp // Use state variable
+            )
         }
     }
     

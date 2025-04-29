@@ -170,18 +170,39 @@ class OverlayController: ObservableObject {
         }
         
         // Ensure we're in Observe mode
-        setMode(mode: .observe)
+        // Note: setMode clears previous overlays, including potentially other observed regions.
+        // If multiple simultaneous observed regions are needed, this clearing needs refinement.
+        setMode(mode: .observe) 
         
         // Generate a unique ID for this region
         let regionId = UUID().uuidString
+        let rect = NSRect(x: x, y: y, width: width, height: height)
         
         addLog(type: .info, message: "Monitoring region at (\(x), \(y), \(width), \(height)) with ID: \(regionId)")
         
-        // Add the region to monitor
-        let rect = NSRect(x: x, y: y, width: width, height: height)
+        // Add the region to monitor internally
         DispatchQueue.main.async {
             self.clickMonitor.addMonitoredRegion(id: regionId, rect: rect)
             self.handleResponse(response: "{\"status\":\"observing\", \"rectId\":\"\(regionId)\"}")
+
+            // Now, also draw the persistent bounding box
+            print("[OverlayController] Drawing persistent box for observe region ID: \(regionId)")
+            // Find the screen for the rect
+            if let targetScreen = findScreen(for: rect) {
+                print("[OverlayController] Found screen \(targetScreen.localizedName) for observe rect \(rect)")
+                self.overlayManager.justDrawRectangle(
+                    screen: targetScreen, 
+                    x: x, y: y, width: width, height: height, 
+                    id: regionId, 
+                    persistent: true, 
+                    strokeColor: .systemBlue, // Use blue for observed regions
+                    fillColor: .systemBlue.withAlphaComponent(0.15) // Lighter blue fill
+                )
+            } else {
+                // Should not happen due to findScreen fallbacks, but log if it does
+                print("[OverlayController] Error: Could not find screen for observe rect \(rect). Bounding box not drawn.")
+                self.addLog(type: .error, message: "Failed to find screen for observed region \(regionId). Bounding box not drawn.")
+            }
         }
     }
     
@@ -284,6 +305,40 @@ class OverlayController: ObservableObject {
     func clearLogs() {
         logs.removeAll()
         commandLogs.removeAll()
+    }
+    
+    // Starts observing a region relative to a target application window
+    func startObservingRegion(targetBundleID: String, width: CGFloat, height: CGFloat, 
+                              bypassFocusCheck: Bool, activateTargetApp: Bool) {
+        
+        // Ensure we're in Observe mode before starting
+        // This also clears any previous overlays, including old observed regions.
+        setMode(mode: .observe)
+
+        overlayManager.observeAnnotation(
+            targetBundleID: targetBundleID, 
+            width: width, height: height, 
+            bypassFocusCheck: bypassFocusCheck, 
+            activateTargetApp: activateTargetApp
+        ) { [weak self] success, regionId, observedRect, onScreen in
+            guard let self = self else { return }
+            
+            DispatchQueue.main.async { // Ensure UI/monitoring updates are on main thread
+                if success, let id = regionId, let rect = observedRect, let screen = onScreen {
+                    print("[OverlayController] Observe annotation succeeded. ID: \(id), Rect (global): \(rect), Screen: \(screen.localizedName)")
+                    // Register the exact rectangle that was drawn with ClickMonitor
+                    self.clickMonitor.addMonitoredRegion(id: id, rect: rect)
+                    self.addLog(type: .info, message: "Started observing region ID \(id) at \(rect) on screen \(screen.localizedName).")
+                    // Send success response
+                    self.handleResponse(response: "{\"status\":\"observing\", \"rectId\":\"\(id)\"}")
+                } else {
+                    print("[OverlayController] Observe annotation failed.")
+                    self.addLog(type: .error, message: "Failed to start observing region for target \(targetBundleID).")
+                    // Send error response
+                    self.handleResponse(response: "{\"error\":\"Failed to draw/observe annotation for target \(targetBundleID)\"}")
+                }
+            }
+        }
     }
 }
 
