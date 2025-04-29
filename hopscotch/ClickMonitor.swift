@@ -7,6 +7,7 @@
 
 import Foundation
 import Cocoa
+import UserNotifications
 
 class ClickMonitor: ObservableObject {
     private var eventTap: CFMachPort?
@@ -19,23 +20,35 @@ class ClickMonitor: ObservableObject {
     private var lastClickTimestamp: Date = Date.distantPast
     private let throttleInterval: TimeInterval = 0.3 // 300ms throttle
     
+    // Static callback function for the event tap
+    private static let eventCallback: CGEventTapCallBack = { proxy, type, event, userInfo in
+        guard let userInfo = userInfo else {
+            return Unmanaged.passUnretained(event)
+        }
+        
+        let monitor = Unmanaged<ClickMonitor>.fromOpaque(userInfo).takeUnretainedValue()
+        
+        if type == .leftMouseDown {
+            monitor.handleMouseClick(event)
+        }
+        return Unmanaged.passUnretained(event)
+    }
+    
     // Start monitoring for clicks
     func startMonitoring() {
         // Create an event tap to monitor mouse clicks
         let eventMask = (1 << CGEventType.leftMouseDown.rawValue)
+        
+        // Create a pointer to self that we can pass to the C callback
+        let selfPtr = Unmanaged.passUnretained(self).toOpaque()
         
         eventTap = CGEvent.tapCreate(
             tap: .cghidEventTap,
             place: .headInsertEventTap,
             options: .defaultTap,
             eventsOfInterest: CGEventMask(eventMask),
-            callback: { [weak self] (proxy, type, event, refcon) -> Unmanaged<CGEvent>? in
-                if type == .leftMouseDown {
-                    self?.handleMouseClick(event)
-                }
-                return Unmanaged.passUnretained(event)
-            },
-            userInfo: nil
+            callback: ClickMonitor.eventCallback,
+            userInfo: selfPtr
         )
         
         if let eventTap = eventTap {
@@ -47,10 +60,26 @@ class ClickMonitor: ObservableObject {
             CGEvent.tapEnable(tap: eventTap, enable: true)
         } else {
             // Failed to create event tap, show notification
-            let notification = NSUserNotification()
-            notification.title = "Input Monitoring Permission Required"
-            notification.informativeText = "Unable to monitor mouse clicks. Please check that Input Monitoring permission is granted."
-            NSUserNotificationCenter.default.deliver(notification)
+            showInputMonitoringNotification()
+        }
+    }
+    
+    // Show a notification for Input Monitoring permission
+    private func showInputMonitoringNotification() {
+        let center = UNUserNotificationCenter.current()
+        center.requestAuthorization(options: [.alert]) { granted, error in
+            if granted {
+                let content = UNMutableNotificationContent()
+                content.title = "Input Monitoring Permission Required"
+                content.body = "Unable to monitor mouse clicks. Please check that Input Monitoring permission is granted."
+                
+                let request = UNNotificationRequest(identifier: "clickMonitor", content: content, trigger: nil)
+                center.add(request) { error in
+                    if let error = error {
+                        print("Error showing notification: \(error.localizedDescription)")
+                    }
+                }
+            }
         }
     }
     
@@ -84,7 +113,7 @@ class ClickMonitor: ObservableObject {
     }
     
     // Handle mouse click events
-    private func handleMouseClick(_ event: CGEvent) {
+    func handleMouseClick(_ event: CGEvent) {
         let clickLocation = event.location
         
         // Check if the click is within throttling interval

@@ -8,12 +8,13 @@
 import Foundation
 import Cocoa
 import ApplicationServices
+import UserNotifications
 
 class PermissionsManager: ObservableObject {
     @Published var accessibilityPermissionGranted = false
     @Published var screenRecordingPermissionGranted = false
     @Published var inputMonitoringPermissionGranted = false
-    
+     
     func checkAllPermissions() {
         checkAccessibilityPermission()
         checkScreenRecordingPermission()
@@ -43,7 +44,7 @@ class PermissionsManager: ObservableObject {
             userInfo: nil
         ) {
             inputMonitoringPermissionGranted = true
-            CFRelease(eventTap)
+            // CFRelease is not needed - Swift handles memory management automatically
         } else {
             inputMonitoringPermissionGranted = false
         }
@@ -75,10 +76,21 @@ class PermissionsManager: ObservableObject {
         let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")!
         NSWorkspace.shared.open(url)
         
-        // Show notification to guide the user
-        let notification = NSUserNotification()
-        notification.title = "Input Monitoring Permission Required"
-        notification.informativeText = "Please add this app to the list of allowed apps and enable it."
-        NSUserNotificationCenter.default.deliver(notification)
+        // Show notification using UserNotifications framework
+        let center = UNUserNotificationCenter.current()
+        center.requestAuthorization(options: [.alert]) { granted, error in
+            if granted {
+                let content = UNMutableNotificationContent()
+                content.title = "Input Monitoring Permission Required"
+                content.body = "Please add this app to the list of allowed apps and enable it."
+                
+                let request = UNNotificationRequest(identifier: "inputMonitoring", content: content, trigger: nil)
+                center.add(request) { error in
+                    if let error = error {
+                        print("Error showing notification: \(error.localizedDescription)")
+                    }
+                }
+            }
+        }
     }
 } 
