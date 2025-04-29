@@ -21,14 +21,35 @@ struct hopscotchApp: App {
 class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private var statusItem: NSStatusItem!
     private var permissionsManager = PermissionsManager()
-    private var overlayController = OverlayController()
+    
+    // Use a lazy initialization for overlay controller to avoid initialization issues
+    private lazy var overlayController: OverlayController = {
+        let controller = OverlayController()
+        return controller
+    }()
+    
+    private var preferencesWindow: NSWindow?
+    private var preferencesHostingController: NSHostingController<PreferencesView>?
+    private var modeUpdateTimer: Timer?
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMenuBar()
         checkPermissions()
         
-        // Subscribe to mode changes from overlay controller
-        observeModeChanges()
+        // Subscribe to mode changes - but set up the timer to be invalidated properly
+        setupModeChangeObservation()
+    }
+    
+    func applicationWillTerminate(_ notification: Notification) {
+        // Clean up timers
+        modeUpdateTimer?.invalidate()
+        modeUpdateTimer = nil
+        
+        // Clean up any overlays
+        overlayController.cleanupForTermination()
+        
+        // Close preferences window safely
+        closePreferencesWindow()
     }
     
     private func setupMenuBar() {
@@ -43,18 +64,25 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     }
     
     private func updateMenuBarIcon(for mode: AppMode) {
-        if let button = statusItem.button {
-            switch mode {
-            case .observe:
-                button.image = NSImage(systemSymbolName: "circle", accessibilityDescription: "Observe Mode")
-            case .act:
-                button.image = NSImage(systemSymbolName: "circle.fill", accessibilityDescription: "Act Mode")
+        DispatchQueue.main.async {
+            if let button = self.statusItem.button {
+                switch mode {
+                case .observe:
+                    button.image = NSImage(systemSymbolName: "circle", accessibilityDescription: "Observe Mode")
+                case .act:
+                    button.image = NSImage(systemSymbolName: "circle.fill", accessibilityDescription: "Act Mode")
+                }
             }
         }
     }
     
     private func setupMenu() {
         let menu = NSMenu()
+        
+        // Add preferences menu item
+        menu.addItem(NSMenuItem(title: "Controls...", action: #selector(showPreferences), keyEquivalent: ","))
+        
+        menu.addItem(NSMenuItem.separator())
         
         let modeMenuItem = NSMenuItem(title: "Mode", action: nil, keyEquivalent: "")
         let modeSubmenu = NSMenu()
@@ -98,20 +126,61 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         }
     }
     
+    @objc private func showPreferences() {
+        DispatchQueue.main.async {
+            // First close any existing window to prevent duplication
+            self.closePreferencesWindow()
+            
+            // Create new preferences view with a clean controller reference
+            let preferencesView = PreferencesView(overlayController: self.overlayController)
+            let hostingController = NSHostingController(rootView: preferencesView)
+            self.preferencesHostingController = hostingController
+            
+            // Create a new window
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 600, height: 500),
+                styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                backing: .buffered,
+                defer: true
+            )
+            
+            window.title = "Overlay Assistant Controls"
+            window.contentViewController = hostingController
+            window.center()
+            window.setContentSize(NSSize(width: 600, height: 520))
+            window.delegate = self
+            
+            self.preferencesWindow = window
+            window.makeKeyAndOrderFront(nil)
+            
+            NSApp.activate(ignoringOtherApps: true)
+        }
+    }
+    
+    private func closePreferencesWindow() {
+        if let window = preferencesWindow {
+            window.close()
+        }
+        preferencesWindow = nil
+        preferencesHostingController = nil
+    }
+    
     private func updatePermissionStatuses() {
-        guard let menu = statusItem.menu,
-              let permissionsMenu = menu.item(withTitle: "Permissions")?.submenu else { return }
-        
-        if let accessibilityItem = permissionsMenu.item(withTitle: permissionsMenu.items[0].title) {
-            accessibilityItem.title = "Accessibility: \(permissionsManager.accessibilityPermissionGranted ? "Granted" : "Not Granted")"
-        }
-        
-        if let screenRecordingItem = permissionsMenu.item(withTitle: permissionsMenu.items[1].title) {
-            screenRecordingItem.title = "Screen Recording: \(permissionsManager.screenRecordingPermissionGranted ? "Granted" : "Not Granted")"
-        }
-        
-        if let inputMonitoringItem = permissionsMenu.item(withTitle: permissionsMenu.items[2].title) {
-            inputMonitoringItem.title = "Input Monitoring: \(permissionsManager.inputMonitoringPermissionGranted ? "Granted" : "Not Granted")"
+        DispatchQueue.main.async {
+            guard let menu = self.statusItem.menu,
+                  let permissionsMenu = menu.item(withTitle: "Permissions")?.submenu else { return }
+            
+            if let accessibilityItem = permissionsMenu.item(withTitle: permissionsMenu.items[0].title) {
+                accessibilityItem.title = "Accessibility: \(self.permissionsManager.accessibilityPermissionGranted ? "Granted" : "Not Granted")"
+            }
+            
+            if let screenRecordingItem = permissionsMenu.item(withTitle: permissionsMenu.items[1].title) {
+                screenRecordingItem.title = "Screen Recording: \(self.permissionsManager.screenRecordingPermissionGranted ? "Granted" : "Not Granted")"
+            }
+            
+            if let inputMonitoringItem = permissionsMenu.item(withTitle: permissionsMenu.items[2].title) {
+                inputMonitoringItem.title = "Input Monitoring: \(self.permissionsManager.inputMonitoringPermissionGranted ? "Granted" : "Not Granted")"
+            }
         }
     }
     
@@ -119,38 +188,48 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         permissionsManager.checkAllPermissions()
     }
     
-    private func observeModeChanges() {
-        // In a real app, we would use Combine or other observation methods
-        // For now, we'll just update periodically
-        Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+    private func setupModeChangeObservation() {
+        // Invalidate any existing timer first
+        modeUpdateTimer?.invalidate()
+        
+        // Create a new timer with a weak reference
+        modeUpdateTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             guard let self = self else { return }
-            self.updateMenuBarIcon(for: self.overlayController.currentMode)
-            self.updateModeMenuItems()
+            DispatchQueue.main.async {
+                self.updateMenuBarIcon(for: self.overlayController.currentMode)
+                self.updateModeMenuItems()
+            }
         }
     }
     
     @objc private func toggleObserveMode() {
-        overlayController.setMode(mode: .observe)
-        updateMenuBarIcon(for: .observe)
-        updateModeMenuItems()
+        DispatchQueue.main.async {
+            self.overlayController.setMode(mode: .observe)
+            self.updateMenuBarIcon(for: .observe)
+            self.updateModeMenuItems()
+        }
     }
     
     @objc private func toggleActMode() {
-        overlayController.setMode(mode: .act)
-        updateMenuBarIcon(for: .act)
-        updateModeMenuItems()
+        DispatchQueue.main.async {
+            self.overlayController.setMode(mode: .act)
+            self.updateMenuBarIcon(for: .act)
+            self.updateModeMenuItems()
+        }
     }
     
     private func updateModeMenuItems() {
-        guard let menu = statusItem.menu,
-              let modeMenu = menu.item(withTitle: "Mode")?.submenu else { return }
-        
-        if let observeItem = modeMenu.item(withTitle: "Observe") {
-            observeItem.state = overlayController.currentMode == .observe ? .on : .off
-        }
-        
-        if let actItem = modeMenu.item(withTitle: "Act") {
-            actItem.state = overlayController.currentMode == .act ? .on : .off
+        DispatchQueue.main.async {
+            guard let menu = self.statusItem.menu,
+                  let modeMenu = menu.item(withTitle: "Mode")?.submenu else { return }
+            
+            if let observeItem = modeMenu.item(withTitle: "Observe") {
+                observeItem.state = self.overlayController.currentMode == .observe ? .on : .off
+            }
+            
+            if let actItem = modeMenu.item(withTitle: "Act") {
+                actItem.state = self.overlayController.currentMode == .act ? .on : .off
+            }
         }
     }
     
@@ -164,6 +243,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     
     @objc private func requestInputMonitoringPermission() {
         permissionsManager.requestInputMonitoringPermission()
+    }
+}
+
+extension AppDelegate: NSWindowDelegate {
+    func windowWillClose(_ notification: Notification) {
+        // Safely handle window closing
+        if let closingWindow = notification.object as? NSWindow, 
+           closingWindow == preferencesWindow {
+            // Only set references to nil after window is fully closed
+            DispatchQueue.main.async {
+                if self.preferencesWindow == closingWindow {
+                    self.preferencesWindow = nil
+                    self.preferencesHostingController = nil
+                }
+            }
+        }
     }
 }
 
