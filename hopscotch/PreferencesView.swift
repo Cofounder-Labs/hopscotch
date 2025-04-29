@@ -27,6 +27,10 @@ struct PreferencesView: View {
     @State private var availableApps: [NSRunningApplication] = []
     @State private var selectedAppIndex: Int = 0
     
+    // Add state for new controls
+    @State private var activateApp: Bool = true
+    @State private var bypassFocusCheck: Bool = true
+    
     // Timer for checking mode changes
     @State private var modeUpdateTimer: Timer? = nil
     
@@ -192,6 +196,16 @@ struct PreferencesView: View {
                     }
                     .padding(.bottom, 12)
                     
+                    // Add Toggles for activateApp and bypassFocusCheck
+                    VStack(alignment: .leading) {
+                         Toggle("Activate Target App First", isOn: $activateApp)
+                            .help("If enabled, the target application will be brought to the front before drawing. If disabled, the annotation will be drawn relative to the target window only if it is already frontmost (unless 'Bypass Focus Check' is also enabled).")
+                        
+                         Toggle("Bypass Focus Check", isOn: $bypassFocusCheck)
+                            .help("If enabled, the annotation will be drawn even if the target application is not the frontmost window. Requires 'Activate Target App First' to be disabled to attempt window-relative drawing on a non-focused app.")
+                    }
+                    .padding(.bottom, 12)
+                    
                     // Draw annotation button - visible and properly styled
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Draw annotations on the screen to highlight areas.")
@@ -263,8 +277,8 @@ struct PreferencesView: View {
                 "width": width,
                 "height": height,
                 "targetBundleID": targetBundleID,
-                "activateApp": true,
-                "bypassFocusCheck": true  // Add this to ensure drawing works even if focus issues
+                "activateApp": activateApp,
+                "bypassFocusCheck": bypassFocusCheck
             ]
         ]
         
