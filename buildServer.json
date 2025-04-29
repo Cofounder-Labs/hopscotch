@@ -1,0 +1,19 @@
+{
+	"name": "xcode build server",
+	"version": "0.2",
+	"bspVersion": "2.0",
+	"languages": [
+		"c",
+		"cpp",
+		"objective-c",
+		"objective-cpp",
+		"swift"
+	],
+	"argv": [
+		"/opt/homebrew/bin/xcode-build-server"
+	],
+	"workspace": "/Users/aby/Documents/hopscotch/hopscotch.xcodeproj/project.xcworkspace",
+	"build_root": "/Users/aby/Library/Developer/Xcode/DerivedData/hopscotch-cgrxlahdevwlbkgdgoigzamdywdk",
+	"scheme": "hopscotch",
+	"kind": "xcode"
+}

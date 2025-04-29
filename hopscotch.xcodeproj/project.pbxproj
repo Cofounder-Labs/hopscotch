@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		404383632DC0604C00BE36C0 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 404383612DC0604C00BE36C0 /* main.swift */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		404383222DC05A5400BE36C0 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -23,10 +27,24 @@
 		};
 /* End PBXContainerItemProxy section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		404383582DC0603000BE36C0 /* CopyFiles */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = /usr/share/man/man1/;
+			dstSubfolderSpec = 0;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 1;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
 		404383132DC05A5300BE36C0 /* hopscotch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = hopscotch.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		404383212DC05A5400BE36C0 /* hopscotchTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = hopscotchTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		4043832B2DC05A5400BE36C0 /* hopscotchUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = hopscotchUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		4043835A2DC0603000BE36C0 /* hoptscotch-cli */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = "hoptscotch-cli"; sourceTree = BUILT_PRODUCTS_DIR; };
+		404383612DC0604C00BE36C0 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -43,6 +61,11 @@
 		4043832E2DC05A5400BE36C0 /* hopscotchUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = hopscotchUITests;
+			sourceTree = "<group>";
+		};
+		4043835B2DC0603000BE36C0 /* hoptscotch-cli */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "hoptscotch-cli";
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -69,15 +92,24 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		404383572DC0603000BE36C0 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
 		4043830A2DC05A5300BE36C0 = {
 			isa = PBXGroup;
 			children = (
+				404383622DC0604C00BE36C0 /* overlayctl */,
 				404383152DC05A5300BE36C0 /* hopscotch */,
 				404383242DC05A5400BE36C0 /* hopscotchTests */,
 				4043832E2DC05A5400BE36C0 /* hopscotchUITests */,
+				4043835B2DC0603000BE36C0 /* hoptscotch-cli */,
 				404383142DC05A5300BE36C0 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -88,8 +120,17 @@
 				404383132DC05A5300BE36C0 /* hopscotch.app */,
 				404383212DC05A5400BE36C0 /* hopscotchTests.xctest */,
 				4043832B2DC05A5400BE36C0 /* hopscotchUITests.xctest */,
+				4043835A2DC0603000BE36C0 /* hoptscotch-cli */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		404383622DC0604C00BE36C0 /* overlayctl */ = {
+			isa = PBXGroup;
+			children = (
+				404383612DC0604C00BE36C0 /* main.swift */,
+			);
+			path = overlayctl;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -163,6 +204,28 @@
 			productReference = 4043832B2DC05A5400BE36C0 /* hopscotchUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		404383592DC0603000BE36C0 /* hoptscotch-cli */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 4043835E2DC0603000BE36C0 /* Build configuration list for PBXNativeTarget "hoptscotch-cli" */;
+			buildPhases = (
+				404383562DC0603000BE36C0 /* Sources */,
+				404383572DC0603000BE36C0 /* Frameworks */,
+				404383582DC0603000BE36C0 /* CopyFiles */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				4043835B2DC0603000BE36C0 /* hoptscotch-cli */,
+			);
+			name = "hoptscotch-cli";
+			packageProductDependencies = (
+			);
+			productName = "hoptscotch-cli";
+			productReference = 4043835A2DC0603000BE36C0 /* hoptscotch-cli */;
+			productType = "com.apple.product-type.tool";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -184,6 +247,9 @@
 						CreatedOnToolsVersion = 16.3;
 						TestTargetID = 404383122DC05A5300BE36C0;
 					};
+					404383592DC0603000BE36C0 = {
+						CreatedOnToolsVersion = 16.3;
+					};
 				};
 			};
 			buildConfigurationList = 4043830E2DC05A5300BE36C0 /* Build configuration list for PBXProject "hopscotch" */;
@@ -203,6 +269,7 @@
 				404383122DC05A5300BE36C0 /* hopscotch */,
 				404383202DC05A5400BE36C0 /* hopscotchTests */,
 				4043832A2DC05A5400BE36C0 /* hopscotchUITests */,
+				404383592DC0603000BE36C0 /* hoptscotch-cli */,
 			);
 		};
 /* End PBXProject section */
@@ -250,6 +317,14 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		404383562DC0603000BE36C0 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				404383632DC0604C00BE36C0 /* main.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -501,6 +576,24 @@
 			};
 			name = Release;
 		};
+		4043835F2DC0603000BE36C0 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		404383602DC0603000BE36C0 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -536,6 +629,15 @@
 			buildConfigurations = (
 				4043833C2DC05A5400BE36C0 /* Debug */,
 				4043833D2DC05A5400BE36C0 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		4043835E2DC0603000BE36C0 /* Build configuration list for PBXNativeTarget "hoptscotch-cli" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4043835F2DC0603000BE36C0 /* Debug */,
+				404383602DC0603000BE36C0 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
