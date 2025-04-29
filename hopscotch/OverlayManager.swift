@@ -274,6 +274,10 @@ class OverlayManager: ObservableObject {
         
         // First, close any existing temporary window if drawing a new temporary
         if !persistent {
+            print("[justDrawRectangle] Drawing temporary window - explicitly closing any existing temporary window")
+            // Cancel any pending cleanup task
+            cancelScheduledCleanup()
+            // Close existing temporary window immediately
             closeTemporaryWindow()
         } else if let regionId = id, persistentViewControllers[regionId] != nil {
             // If drawing persistent and ID already exists, remove the old one first
@@ -302,8 +306,11 @@ class OverlayManager: ObservableObject {
             print("[justDrawRectangle] Storing persistent view controller for ID: \(regionId)")
             persistentViewControllers[regionId] = viewController
         } else {
-            // Close existing temporary view controller if any
-            temporaryViewController = nil
+            // Make absolutely sure any previous controller is gone
+            if temporaryViewController != nil {
+                print("[justDrawRectangle] Ensuring previous temporary controller is explicitly released")
+                temporaryViewController = nil
+            }
             
             // Store new temporary view controller
             print("[justDrawRectangle] Storing temporary view controller.")
@@ -481,8 +488,23 @@ class OverlayManager: ObservableObject {
 
         if temporaryViewController != nil {
             print("[closeTemporaryWindow] Releasing temporary view controller.")
+            
+            // Get reference to the controller we're about to release
+            if let controller = temporaryViewController {
+                // Remove the window from screen
+                if let window = (controller as? RectangleViewController)?.window {
+                    print("[closeTemporaryWindow] Explicitly removing window from screen")
+                    window.orderOut(nil)
+                }
+            }
+            
             // First set to nil to break any references
             temporaryViewController = nil
+            
+            // Force a garbage collection to help with cleanup
+            autoreleasepool {
+                print("[closeTemporaryWindow] Running autorelease pool to clean up resources")
+            }
             
             // Signal ready state
             DispatchQueue.main.async {
@@ -548,7 +570,8 @@ class OverlayManager: ObservableObject {
 
 // Custom ViewController to manage window lifecycle
 class RectangleViewController: NSViewController {
-    private var window: NSWindow?
+    // Make window property accessible so parent can access it
+    var window: NSWindow?
     
     init(screenFrame: CGRect, rectangle: CGRect, strokeColor: NSColor = .green, fillColor: NSColor = .green.withAlphaComponent(0.3)) {
         super.init(nibName: nil, bundle: nil)
@@ -598,6 +621,10 @@ class RectangleViewController: NSViewController {
     
     deinit {
         print("[RectangleViewController] Deinitializing and closing window")
+        // Explicitly remove window from screen
+        window?.orderOut(nil)
+        // Set content view controller to nil to break reference cycle
+        window?.contentViewController = nil
         // Close the window when the view controller is deallocated
         window?.close()
         window = nil
