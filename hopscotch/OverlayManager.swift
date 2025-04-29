@@ -45,59 +45,81 @@ func getWindowFrame(for bundleID: String) -> CGRect? {
             mainWindow = focusedWindow
         } else {
              print("[getWindowFrame] Error: Could not get main or focused window for \(bundleID). Main Error: \(error.rawValue), Focused Error: \(focusedError.rawValue)")
-             // Don't release mainWindow here if it wasn't successfully obtained
              return nil
         }
     } else {
         print("[getWindowFrame] Successfully got main window.")
     }
 
-    // Ensure mainWindow is of the correct type before proceeding
     guard let windowElement = mainWindow as! AXUIElement? else {
          print("[getWindowFrame] Error: Main window reference obtained is not an AXUIElement.")
-         // if mainWindow != nil { CFRelease(mainWindow) } // No need to release with ARC
          return nil
     }
 
-
-    // Get window position
     var positionValue: CFTypeRef?
     print("[getWindowFrame] Trying to get kAXPositionAttribute...")
     let positionError = AXUIElementCopyAttributeValue(windowElement, kAXPositionAttribute as CFString, &positionValue)
     guard positionError == .success, let positionRef = positionValue, CFGetTypeID(positionRef) == AXValueGetTypeID() else {
         print("[getWindowFrame] Error: Could not get window position for \(bundleID). Error: \(positionError.rawValue)")
-        // if positionValue != nil { CFRelease(positionValue) } // No need to release with ARC
-        // if mainWindow != nil { CFRelease(mainWindow) } // No need to release with ARC
         return nil
     }
-
     var windowPosition: CGPoint = .zero
     AXValueGetValue(positionRef as! AXValue, .cgPoint, &windowPosition)
-    print("[getWindowFrame] Successfully got window position: \(windowPosition)")
-    // CFRelease(positionRef) // No need to release with ARC
+    print("[getWindowFrame] Successfully got window position (global): \(windowPosition)")
 
-    // Get window size
     var sizeValue: CFTypeRef?
     print("[getWindowFrame] Trying to get kAXSizeAttribute...")
     let sizeError = AXUIElementCopyAttributeValue(windowElement, kAXSizeAttribute as CFString, &sizeValue)
      guard sizeError == .success, let sizeRef = sizeValue, CFGetTypeID(sizeRef) == AXValueGetTypeID() else {
         print("[getWindowFrame] Error: Could not get window size for \(bundleID). Error: \(sizeError.rawValue)")
-        // if sizeValue != nil { CFRelease(sizeValue) } // No need to release with ARC
-        // if mainWindow != nil { CFRelease(mainWindow) } // No need to release with ARC
         return nil
     }
-
     var windowSize: CGSize = .zero
     AXValueGetValue(sizeRef as! AXValue, .cgSize, &windowSize)
     print("[getWindowFrame] Successfully got window size: \(windowSize)")
-    // CFRelease(sizeRef) // No need to release with ARC
-
-    // Release the main window reference - ARC handles this
-    // if mainWindow != nil { CFRelease(mainWindow) }
 
     let finalFrame = CGRect(origin: windowPosition, size: windowSize)
-    print("[getWindowFrame] Successfully retrieved window frame: \(finalFrame)")
+    print("[getWindowFrame] Successfully retrieved window frame (global): \(finalFrame)")
     return finalFrame
+}
+
+// Helper to find screen containing the majority of a rect
+func findScreen(for rect: CGRect) -> NSScreen? {
+    var bestScreen: NSScreen? = nil
+    var maxIntersectionArea: CGFloat = 0.0
+
+    print("[findScreen] Finding screen for rect (global): \(rect)")
+    for screen in NSScreen.screens {
+        let screenFrame = screen.frame // screen.frame is in global coordinates
+        let intersection = rect.intersection(screenFrame)
+        
+        if !intersection.isNull {
+            let area = intersection.width * intersection.height
+            print("[findScreen]   Checking screen \(screen.localizedName) (Frame: \(screenFrame)). Intersection area: \(area)")
+            if area > maxIntersectionArea {
+                maxIntersectionArea = area
+                bestScreen = screen
+            }
+        }
+    }
+    
+    if let foundScreen = bestScreen {
+         print("[findScreen] Best match found: \(foundScreen.localizedName) with area \(maxIntersectionArea)")
+    } else {
+         // Fallback: Check if center point is on any screen
+         let center = CGPoint(x: rect.midX, y: rect.midY)
+         print("[findScreen] No intersection found, checking center point \(center)")
+         bestScreen = NSScreen.screens.first { $0.frame.contains(center) }
+         if let foundScreen = bestScreen {
+             print("[findScreen] Fallback found screen containing center: \(foundScreen.localizedName)")
+         } else {
+              // Extreme Fallback: Use main screen
+              print("[findScreen] Warning: Could not find screen for rect. Falling back to main screen.")
+              bestScreen = NSScreen.main
+         }
+    }
+   
+    return bestScreen
 }
 
 class OverlayManager: ObservableObject {
@@ -159,36 +181,43 @@ class OverlayManager: ObservableObject {
             
             print("[performRelativeDraw] Attempting to get window frame for \(targetBundleID).")
             if let windowFrame = getWindowFrame(for: targetBundleID) {
-                print("[performRelativeDraw] Successfully got window frame: \(windowFrame). Input relative coords ignored: (\(x), \(y))")
-                
-                // --- Calculate coordinates to center the annotation --- 
-                // Use the provided width and height, but calculate x,y to center it in the windowFrame
-                let centerAbsoluteX = windowFrame.origin.x + (windowFrame.width / 2)
-                let centerAbsoluteY = windowFrame.origin.y + (windowFrame.height / 2)
-                
-                // Adjust origin based on the annotation's own width/height to center it
-                let absoluteX = centerAbsoluteX - (width / 2)
-                let absoluteY = centerAbsoluteY - (height / 2)
-                print("[performRelativeDraw] Calculated centered absolute coordinates: (\(absoluteX), \(absoluteY)) for size (\(width), \(height))")
-                // --- End centering calculation --- 
-                
-                guard let screen = NSScreen.main else {
-                    print("[performRelativeDraw] Error: Cannot get main screen frame.")
+                // --- Determine Target Screen --- 
+                print("[performRelativeDraw] Finding screen for window frame: \(windowFrame)")
+                guard let targetScreen = findScreen(for: windowFrame) else {
+                    // findScreen should always return at least the main screen as fallback
+                    print("[performRelativeDraw] Error: findScreen unexpectedly returned nil. This should not happen.") 
                     completion(false)
                     return
                 }
-                let screenFrame = screen.frame
-                let calculatedRect = CGRect(x: absoluteX, y: absoluteY, width: width, height: height)
-                print("[performRelativeDraw] Main screen frame: \(screenFrame). Calculated target rect: \(calculatedRect)")
+                print("[performRelativeDraw] Target screen identified: \(targetScreen.localizedName), Frame (global): \(targetScreen.frame)")
+                // --- End Determine Target Screen ---
+
+                print("[performRelativeDraw] Successfully got window frame (global): \(windowFrame). Input relative coords ignored: (\(x), \(y))")
                 
-                if screenFrame.contains(calculatedRect.origin) { 
-                    print("[performRelativeDraw] Calculated rectangle origin is on-screen. Drawing...")
-                    self.justDrawRectangle(x: absoluteX, y: absoluteY, width: width, height: height)
-                    completion(true)
-                } else {
-                    print("[performRelativeDraw] Error: Calculated rectangle origin (\(calculatedRect.origin)) is off-screen (Screen: \(screenFrame)).")
-                    completion(false)
+                // Calculate coordinates to center the annotation (using global coordinates)
+                let centerAbsoluteX = windowFrame.origin.x + (windowFrame.width / 2)
+                let centerAbsoluteY = windowFrame.origin.y + (windowFrame.height / 2)
+                let absoluteX = centerAbsoluteX - (width / 2)
+                let absoluteY = centerAbsoluteY - (height / 2)
+                print("[performRelativeDraw] Calculated centered absolute coordinates (global): (\(absoluteX), \(absoluteY)) for size (\(width), \(height))")
+                
+                // Check bounds against the TARGET screen's global frame
+                let screenFrame = targetScreen.frame 
+                let calculatedRect = CGRect(x: absoluteX, y: absoluteY, width: width, height: height)
+                print("[performRelativeDraw] Target screen frame (global): \(screenFrame). Calculated target rect (global): \(calculatedRect)")
+                
+                // Check if the calculated rect intersects the target screen at all
+                if !calculatedRect.intersects(screenFrame) {
+                     print("[performRelativeDraw] Error: Calculated rectangle does not intersect target screen frame. Not drawing.")
+                     completion(false)
+                     return
                 }
+
+                print("[performRelativeDraw] Calculated rectangle intersects target screen. Drawing...")
+                // Pass targetScreen and global coordinates to justDrawRectangle
+                self.justDrawRectangle(screen: targetScreen, x: absoluteX, y: absoluteY, width: width, height: height)
+                completion(true)
+                
             } else {
                 print("[performRelativeDraw] Error: Failed to get window frame for \(targetBundleID). Cannot draw annotation.")
                 completion(false)
@@ -234,33 +263,29 @@ class OverlayManager: ObservableObject {
     }
     
     // Absolute minimal, safest drawing function
-    private func justDrawRectangle(x: CGFloat, y: CGFloat, width: CGFloat, height: CGFloat) {
+    private func justDrawRectangle(screen targetScreen: NSScreen, x: CGFloat, y: CGFloat, width: CGFloat, height: CGFloat) {
         // Sanity check for main thread
         if !Thread.isMainThread {
              print("[justDrawRectangle] Warning: Not on main thread. Dispatching asynchronously.")
             DispatchQueue.main.async {
-                self.justDrawRectangle(x: x, y: y, width: width, height: height)
+                self.justDrawRectangle(screen: targetScreen, x: x, y: y, width: width, height: height)
             }
             return
         }
-        print("[justDrawRectangle] Drawing rectangle at screen coords: (\(x), \(y)), Size: (\(width), \(height))")
+        print("[justDrawRectangle] Drawing on screen: \(targetScreen.localizedName) at global coords: (\(x), \(y)), Size: (\(width), \(height))")
         
         // First close any existing window
         closeWindow()
         
-        // Create a new window only if we have a valid screen
-        guard let screen = NSScreen.main else {
-            print("[justDrawRectangle] Error: No main screen available")
-            return
-        }
-        print("[justDrawRectangle] Using screen frame: \(screen.frame)")
+        // Use the passed-in target screen
+        print("[justDrawRectangle] Using target screen frame (global): \(targetScreen.frame)")
         
-        // Create a borderless window
+        // Create a borderless window using the TARGET screen's frame
         let newWindow = NSWindow(
-            contentRect: screen.frame,
+            contentRect: targetScreen.frame, // Use target screen frame
             styleMask: .borderless,
             backing: .buffered,
-            defer: true // Using defer: true can help with memory issues
+            defer: true 
         )
         
         // Set window properties
@@ -270,16 +295,22 @@ class OverlayManager: ObservableObject {
         newWindow.ignoresMouseEvents = true
         newWindow.hasShadow = false
         
-        // Fix for macOS window behavior - make sure it stays visible
-        newWindow.collectionBehavior = [.canJoinAllSpaces, .stationary]
+        // Ensure window appears on the correct screen, even in fullscreen apps
+        newWindow.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
         
-        // Use flipped coordinates to match screen coordinates
-        // Screen origin is top-left. NSView origin is bottom-left by default.
-        // Our calculation uses top-left origin (from AX API and screen), and RectangleView is flipped (isFlipped = true), so it also expects top-left.
-        // Therefore, we pass the calculated absolute x,y directly without further flipping.
-        let rectangleForView = CGRect(x: x, y: y, width: width, height: height)
-        print("[justDrawRectangle] Creating RectangleView with frame: \(screen.frame) and rectangleFrame: \(rectangleForView) (using direct top-left coords Y=\(y))")
-        let customView = RectangleView(frame: screen.frame, rectangleFrame: rectangleForView)
+        // Coordinate calculation for the view - relative to the window's frame (targetScreen.frame)
+        // (x, y) are global coords (origin top-left of primary screen). 
+        // targetScreen.frame.origin is the global coordinate of the target screen's top-left.
+        // The view needs coordinates relative to the window's contentRect origin (which is targetScreen.frame.origin).
+        // Since RectangleView is flipped (top-left origin), we translate global (x,y) to be relative to the target screen's top-left.
+        let viewX = x - targetScreen.frame.origin.x
+        let viewY = y - targetScreen.frame.origin.y
+
+        let rectangleForView = CGRect(x: viewX, y: viewY, width: width, height: height)
+        print("[justDrawRectangle] Creating RectangleView with window frame origin: \(targetScreen.frame.origin), size: \(targetScreen.frame.size). Rectangle frame relative to window: \(rectangleForView)")
+        
+        // Create the view with a frame size matching the window (target screen)
+        let customView = RectangleView(frame: NSRect(origin: .zero, size: targetScreen.frame.size), rectangleFrame: rectangleForView)
         
         // Set the content view
         newWindow.contentView = customView
@@ -294,7 +325,7 @@ class OverlayManager: ObservableObject {
         scheduleCleanup(delay: 2.0)
         
         // Log success
-        print("{\"status\":\"drawn\", \"ts\":\\(Int(Date().timeIntervalSince1970 * 1000))}") // Keep original JSON output
+        print("{\"status\":\"drawn\", \"ts\":\\(Int(Date().timeIntervalSince1970 * 1000))}") 
         print("[justDrawRectangle] Window created and scheduled for cleanup.")
     }
     
@@ -342,6 +373,10 @@ class OverlayManager: ObservableObject {
              print("[closeWindow] Preparing to close window.")
              // Set reference to nil FIRST to prevent concurrent close attempts
              self.windowRef = nil
+
+             // Explicitly remove from screen before closing
+             print("[closeWindow] Ordering window out.")
+             windowToClose.orderOut(nil) 
 
              // Optional: Explicitly remove the content view before closing, might help cleanup
              windowToClose.contentView = nil
