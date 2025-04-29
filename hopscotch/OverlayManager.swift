@@ -337,13 +337,19 @@ class OverlayManager: ObservableObject {
             return
         }
         
-        // Close and release the window
-        if let window = windowRef {
-            print("[closeWindow] Closing window.")
-            window.close()
-            windowRef = nil
+        // Check if we have a window reference *before* nilling it
+        if let windowToClose = windowRef {
+             print("[closeWindow] Preparing to close window.")
+             // Set reference to nil FIRST to prevent concurrent close attempts
+             self.windowRef = nil
+
+             // Optional: Explicitly remove the content view before closing, might help cleanup
+             windowToClose.contentView = nil
+             print("[closeWindow] Closing window.")
+             // Now close the window instance we captured
+             windowToClose.close()
         } else {
-            // print("[closeWindow] No window to close.") // Optional: Log if no window existed
+             // print("[closeWindow] No window reference to close.")
         }
     }
     
