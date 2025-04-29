@@ -34,6 +34,9 @@ struct PreferencesView: View {
     // Timer for checking mode changes
     @State private var modeUpdateTimer: Timer? = nil
     
+    // Add state for user input
+    @State private var userInputText: String = ""
+    
     init(overlayController: OverlayController) {
         self.overlayController = overlayController
         self._currentMode = State(initialValue: overlayController.overlayMode)
@@ -244,6 +247,26 @@ struct PreferencesView: View {
                         .tint(.green)
                         // .disabled(currentMode == .regionSelect) // Let user define multiple regions if needed
                         .padding(.vertical, 8)
+                    }
+                    .padding(.bottom, 12)
+                    
+                    // User Text Input Area
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("User Input:")
+                            .font(.headline)
+                            .padding(.bottom, 4)
+                        
+                        Text("Enter any text below. This is just for reference and doesn't affect the app functionality.")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.bottom, 4)
+                        
+                        TextEditor(text: $userInputText)
+                            .font(.body)
+                            .frame(height: 120)
+                            .border(Color.gray.opacity(0.3), width: 1)
+                            .cornerRadius(4)
                     }
                     .padding(.bottom, 12)
                     
