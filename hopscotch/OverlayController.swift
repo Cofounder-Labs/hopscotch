@@ -255,7 +255,7 @@ class OverlayController: ObservableObject {
     private func setupStandardInputReader() {
         // Check if we're running in a context where stdin is available
         // For GUI apps, this may not be the case
-        let stdinHandle = FileHandle.standardInput
+        _ = FileHandle.standardInput
         
         // Create a thread for reading from stdin to avoid blocking the main thread
         stdinReader = Thread {
@@ -345,6 +345,11 @@ class OverlayController: ObservableObject {
                 }
             }
         }
+    }
+    
+    // --- Add screenshot function for UI ---
+    func takeScreenshotOfSelectedApp(bundleID: String, completion: @escaping (NSImage?) -> Void) {
+        overlayManager.screenshotOfAppWindow(bundleID: bundleID, completion: completion)
     }
 }
 

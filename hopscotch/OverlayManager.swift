@@ -9,6 +9,8 @@ import Foundation
 import Cocoa
 import SwiftUI
 import ApplicationServices
+import ScreenCaptureKit
+import AVFoundation
 
 // Helper function to check Accessibility Permissions
 func checkAccessibilityPermissions() -> Bool {
@@ -130,6 +132,10 @@ class OverlayManager: ObservableObject {
     // Use a dispatch work item we can cancel if needed (only for temporary window)
     private var cleanupTask: DispatchWorkItem?
     
+    // Keep strong references for ScreenCaptureKit screenshot
+    private var screenshotFrameReceiver: AnyObject?
+    private var screenshotStream: SCStream?
+    
     deinit {
         cancelScheduledCleanup()
         closeTemporaryWindow()
@@ -228,7 +234,7 @@ class OverlayManager: ObservableObject {
                  completion(false)
                  return
             }
-            targetApp.activate(options: .activateIgnoringOtherApps)
+            targetApp.activate(options: [])
             
             // Wait a bit for activation and window focus, then attempt relative draw
             print("[drawAnnotation] Scheduling relative draw after 0.5s delay for activation.")
@@ -420,7 +426,7 @@ class OverlayManager: ObservableObject {
                  completion(false, nil, nil, nil)
                  return
             }
-            targetApp.activate(options: .activateIgnoringOtherApps)
+            targetApp.activate(options: [])
             
             print("[observeAnnotation] Scheduling relative observe draw after 0.5s delay for activation.")
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
@@ -565,6 +571,151 @@ class OverlayManager: ObservableObject {
     func clearOverlays() {
         print("[clearOverlays] Public clear method called.")
         cleanupEverything()
+    }
+
+    /// Takes a screenshot of the main window of the app with the given bundle ID using ScreenCaptureKit (async).
+    /// Calls the completion handler with an NSImage of the window, or nil if not possible.
+    func screenshotOfAppWindow(bundleID: String, completion: @escaping (NSImage?) -> Void) {
+        // Check if screen recording permission is granted
+        if !CGPreflightScreenCaptureAccess() {
+            print("[ScreenCaptureKit] Screen recording permission not granted")
+            // Request permission
+            CGRequestScreenCaptureAccess()
+            completion(nil)
+            return
+        }
+        
+        // Clear any existing screenshot objects
+        screenshotFrameReceiver = nil
+        screenshotStream = nil
+        
+        // Create our output handler class
+        class FrameReceiver: NSObject, SCStreamOutput {
+            let completion: (NSImage?) -> Void
+            var didReceiveFrame = false
+            weak var manager: OverlayManager?
+            
+            init(completion: @escaping (NSImage?) -> Void, manager: OverlayManager) {
+                self.completion = completion
+                self.manager = manager
+                super.init()
+            }
+            
+            func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of outputType: SCStreamOutputType) {
+                // Only process video frames
+                guard outputType == .screen else { return }
+                
+                print("[ScreenCaptureKit] Received sample buffer of type: \(outputType)")
+                
+                // Only handle the first frame
+                guard !didReceiveFrame else { return }
+                didReceiveFrame = true
+                
+                // Process the frame
+                if let imageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) {
+                    let ciImage = CIImage(cvImageBuffer: imageBuffer)
+                    let rep = NSCIImageRep(ciImage: ciImage)
+                    let nsImage = NSImage(size: rep.size)
+                    nsImage.addRepresentation(rep)
+                    
+                    // Call completion on main thread
+                    DispatchQueue.main.async {
+                        self.completion(nsImage)
+                    }
+                    
+                    print("[ScreenCaptureKit] Successfully captured image")
+                } else {
+                    print("[ScreenCaptureKit] Failed to get image buffer from sample buffer")
+                    DispatchQueue.main.async {
+                        self.completion(nil)
+                    }
+                }
+                
+                // Stop the capture and clean up
+                DispatchQueue.main.async {
+                    print("[ScreenCaptureKit] Stopping stream capture")
+                    stream.stopCapture { error in
+                        if let error = error {
+                            print("[ScreenCaptureKit] Error stopping capture: \(error)")
+                        }
+                        
+                        // Release strong references
+                        self.manager?.screenshotFrameReceiver = nil
+                        self.manager?.screenshotStream = nil
+                    }
+                }
+            }
+        }
+        
+        // Start the async task to capture screenshot
+        Task {
+            do {
+                print("[ScreenCaptureKit] Starting screenshot capture for \(bundleID)")
+                
+                // 1. Get available content
+                print("[ScreenCaptureKit] Fetching available content")
+                let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+                
+                // Print all windows for debugging
+                print("[ScreenCaptureKit] Available windows:")
+                for window in content.windows {
+                    print("  - \(window.title ?? "Untitled") (Bundle: \(window.owningApplication?.bundleIdentifier ?? "None"))")
+                }
+                
+                // 2. Find our target window
+                guard let window = content.windows.first(where: { $0.owningApplication?.bundleIdentifier == bundleID }) else {
+                    print("[ScreenCaptureKit] No window found for bundle ID \(bundleID)")
+                    DispatchQueue.main.async {
+                        completion(nil)
+                    }
+                    return
+                }
+                
+                print("[ScreenCaptureKit] Found window: \(window.title ?? "Untitled") with frame: \(window.frame)")
+                
+                // 3. Create stream configuration
+                let config = SCStreamConfiguration()
+                config.width = Int(window.frame.width)
+                config.height = Int(window.frame.height)
+                config.showsCursor = false
+                config.pixelFormat = kCVPixelFormatType_32BGRA
+                
+                // 4. Create content filter
+                let filter = SCContentFilter(desktopIndependentWindow: window)
+                
+                // 5. Create frame receiver and keep strong reference
+                let receiver = FrameReceiver(completion: completion, manager: self)
+                self.screenshotFrameReceiver = receiver
+                
+                // 6. Create stream (without delegate)
+                print("[ScreenCaptureKit] Creating capture stream")
+                let stream = SCStream(filter: filter, configuration: config, delegate: nil)
+                self.screenshotStream = stream
+                
+                // 7. Add our receiver as a stream output
+                print("[ScreenCaptureKit] Adding stream output")
+                try stream.addStreamOutput(receiver, type: .screen, sampleHandlerQueue: .main)
+                
+                // 8. Start capture
+                print("[ScreenCaptureKit] Starting capture")
+                try await stream.startCapture()
+                
+                // The frame will be delivered to the receiver.stream() method
+                
+            } catch {
+                print("[ScreenCaptureKit] Error: \(error)")
+                DispatchQueue.main.async {
+                    completion(nil)
+                    self.screenshotFrameReceiver = nil
+                    self.screenshotStream = nil
+                }
+            }
+        }
+    }
+
+    @available(*, unavailable, message: "Use the async screenshotOfAppWindow(bundleID:completion:) version instead.")
+    func screenshotOfAppWindow(bundleID: String) -> NSImage? {
+        fatalError("Use the async screenshotOfAppWindow(bundleID:completion:) version instead.")
     }
 }
 

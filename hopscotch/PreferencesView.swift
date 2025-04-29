@@ -37,6 +37,10 @@ struct PreferencesView: View {
     // Add state for user input
     @State private var userInputText: String = ""
     
+    // Add state for screenshot
+    @State private var screenshotImage: NSImage? = nil
+    @State private var isScreenshotLoading: Bool = false
+    
     init(overlayController: OverlayController) {
         self.overlayController = overlayController
         self._currentMode = State(initialValue: overlayController.overlayMode)
@@ -249,7 +253,43 @@ struct PreferencesView: View {
                         .padding(.vertical, 8)
                     }
                     .padding(.bottom, 12)
-                    
+
+                    // --- Screenshot Area ---
+                    Divider()
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Screenshot the selected app's main window:")
+                            .font(.headline)
+                        Button(action: {
+                            takeScreenshot()
+                        }) {
+                            Text("Take Screenshot")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.purple)
+                        .disabled(targetBundleID.isEmpty || isScreenshotLoading)
+                        .padding(.vertical, 8)
+                        if isScreenshotLoading {
+                            ProgressView("Capturing screenshot...")
+                                .padding(.top, 4)
+                        } else if let screenshot = screenshotImage {
+                            Image(nsImage: screenshot)
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(maxWidth: 400, maxHeight: 240)
+                                .border(Color.gray.opacity(0.3), width: 1)
+                                .cornerRadius(4)
+                                .padding(.top, 4)
+                        } else {
+                            Text("No screenshot taken yet.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .padding(.bottom, 12)
+                    Divider()
+                    // --- End Screenshot Area ---
+
                     // User Text Input Area
                     VStack(alignment: .leading, spacing: 8) {
                         Text("User Input:")
@@ -347,6 +387,18 @@ struct PreferencesView: View {
                 bypassFocusCheck: bypassFocusCheck, // Use state variable 
                 activateTargetApp: activateApp // Use state variable
             )
+        }
+    }
+    
+    private func takeScreenshot() {
+        guard !targetBundleID.isEmpty else { return }
+        isScreenshotLoading = true
+        screenshotImage = nil
+        overlayController.takeScreenshotOfSelectedApp(bundleID: targetBundleID) { image in
+            DispatchQueue.main.async {
+                self.screenshotImage = image
+                self.isScreenshotLoading = false
+            }
         }
     }
     
