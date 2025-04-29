@@ -311,9 +311,15 @@ class OverlayController: ObservableObject {
     func startObservingRegion(targetBundleID: String, width: CGFloat, height: CGFloat, 
                               bypassFocusCheck: Bool, activateTargetApp: Bool) {
         
-        // Ensure we're in Observe mode before starting
-        // This also clears any previous overlays, including old observed regions.
-        setMode(mode: .observe)
+        // Ensure the click monitor is running (safe to call multiple times)
+        print("[OverlayController] Ensuring click monitor is started for observe region...")
+        clickMonitor.startMonitoring()
+        
+        // Set internal mode if needed, but DON'T clear overlays here
+        if currentMode != .observe {
+            currentMode = .observe // Update state without calling setMode's side effects
+            // If stopping monitor on mode change is desired, handle it elsewhere
+        }
 
         overlayManager.observeAnnotation(
             targetBundleID: targetBundleID, 

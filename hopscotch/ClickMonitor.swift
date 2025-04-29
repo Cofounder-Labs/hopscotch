@@ -36,6 +36,10 @@ class ClickMonitor: ObservableObject {
     
     // Start monitoring for clicks
     func startMonitoring() {
+        // Ensure previous tap is stopped if restarting
+        stopMonitoring()
+        print("[ClickMonitor] Attempting to start monitoring and create event tap...")
+
         // Create an event tap to monitor mouse clicks
         let eventMask = (1 << CGEventType.leftMouseDown.rawValue)
         
@@ -52,14 +56,24 @@ class ClickMonitor: ObservableObject {
         )
         
         if let eventTap = eventTap {
-            // Create a run loop source and add it to the current run loop
+            // --- Tap Creation Succeeded ---
+            print("[ClickMonitor] SUCCESS: CGEvent.tapCreate succeeded.")
             runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, eventTap, 0)
-            CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
-            
-            // Enable the event tap
-            CGEvent.tapEnable(tap: eventTap, enable: true)
+            if let runLoopSource = runLoopSource {
+                 CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
+                 CGEvent.tapEnable(tap: eventTap, enable: true)
+                 print("[ClickMonitor] Event tap enabled and added to run loop.")
+            } else {
+                 print("[ClickMonitor] ERROR: Failed to create run loop source even though tap was created.")
+                 // Clean up tap if source creation failed
+                 CFMachPortInvalidate(eventTap)
+                 self.eventTap = nil
+            }
         } else {
-            // Failed to create event tap, show notification
+            // --- Tap Creation Failed ---
+            print("[ClickMonitor] ERROR: CGEvent.tapCreate failed. This likely means Input Monitoring permission is missing or denied.")
+            print("[ClickMonitor] Please check System Settings > Privacy & Security > Input Monitoring.")
+            // Optionally show notification (already present)
             showInputMonitoringNotification()
         }
     }
@@ -114,32 +128,40 @@ class ClickMonitor: ObservableObject {
     
     // Handle mouse click events
     func handleMouseClick(_ event: CGEvent) {
-        let clickLocation = event.location
+        let clickLocation = event.location // Top-left origin screen coordinates
         
         // Check if the click is within throttling interval
         let now = Date()
         if now.timeIntervalSince(lastClickTimestamp) < throttleInterval {
+            // print("[ClickMonitor] Click throttled") // Optional debug log
             return
         }
-        
-        // Update throttle timestamp
         lastClickTimestamp = now
+        print("[ClickMonitor] Handling click at screen coordinates: \(clickLocation)")
         
-        // Convert Quartz coordinates to Cocoa coordinates
-        let clickLocationCocoa = convertQuartzCoordinatesToCocoa(clickLocation)
+        // // Convert Quartz coordinates to Cocoa coordinates - REMOVED as both event and regions use top-left origin
+        // let clickLocationCocoa = convertQuartzCoordinatesToCocoa(clickLocation)
         
-        // Check if click is inside any monitored region
+        // Check if click (using top-left origin) is inside any monitored region (also top-left origin)
+        var foundRegion = false
         for (regionId, rect) in monitoredRegions {
-            if rect.contains(clickLocationCocoa) {
+             print("[ClickMonitor]   Checking against region ID \(regionId): \(rect)")
+            if rect.contains(clickLocation) { // Use clickLocation directly
+                print("[ClickMonitor]   Click IS inside region ID \(regionId)")
                 reportClickInRegion(regionId: regionId)
-                break
+                foundRegion = true
+                break // Stop checking once found
             }
+        }
+        if !foundRegion {
+             print("[ClickMonitor] Click was outside all monitored regions.")
         }
     }
     
     // Convert Quartz coordinates to Cocoa coordinates
     private func convertQuartzCoordinatesToCocoa(_ point: CGPoint) -> NSPoint {
         // Quartz has origin at top-left, Cocoa has origin at bottom-left
+        // THIS FUNCTION IS LIKELY INCORRECT FOR THIS USE CASE AND IS NO LONGER CALLED
         guard let mainScreen = NSScreen.main else {
             return NSPoint(x: point.x, y: point.y)
         }
