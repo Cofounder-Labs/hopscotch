@@ -6,10 +6,6 @@
 	objectVersion = 77;
 	objects = {
 
-/* Begin PBXBuildFile section */
-		404383632DC0604C00BE36C0 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 404383612DC0604C00BE36C0 /* main.swift */; };
-/* End PBXBuildFile section */
-
 /* Begin PBXContainerItemProxy section */
 		404383222DC05A5400BE36C0 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -44,7 +40,6 @@
 		404383212DC05A5400BE36C0 /* hopscotchTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = hopscotchTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		4043832B2DC05A5400BE36C0 /* hopscotchUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = hopscotchUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		4043835A2DC0603000BE36C0 /* hoptscotch-cli */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = "hoptscotch-cli"; sourceTree = BUILT_PRODUCTS_DIR; };
-		404383612DC0604C00BE36C0 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -105,7 +100,6 @@
 		4043830A2DC05A5300BE36C0 = {
 			isa = PBXGroup;
 			children = (
-				404383622DC0604C00BE36C0 /* overlayctl */,
 				404383152DC05A5300BE36C0 /* hopscotch */,
 				404383242DC05A5400BE36C0 /* hopscotchTests */,
 				4043832E2DC05A5400BE36C0 /* hopscotchUITests */,
@@ -123,14 +117,6 @@
 				4043835A2DC0603000BE36C0 /* hoptscotch-cli */,
 			);
 			name = Products;
-			sourceTree = "<group>";
-		};
-		404383622DC0604C00BE36C0 /* overlayctl */ = {
-			isa = PBXGroup;
-			children = (
-				404383612DC0604C00BE36C0 /* main.swift */,
-			);
-			path = overlayctl;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -324,7 +310,6 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				404383632DC0604C00BE36C0 /* main.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
