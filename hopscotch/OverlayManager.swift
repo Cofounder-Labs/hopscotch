@@ -123,17 +123,14 @@ func findScreen(for rect: CGRect) -> NSScreen? {
 }
 
 class OverlayManager: ObservableObject {
-    // Use an optional to track our temporary window
-    private var temporaryWindowRef: NSWindow?
-    // Dictionary to hold persistent windows for observed regions
-    private var persistentWindows: [String: NSWindow] = [:]
+    // Use a view controller to manage window lifetime 
+    private var temporaryViewController: NSViewController?
+    private var persistentViewControllers: [String: NSViewController] = [:]
     
     // Use a dispatch work item we can cancel if needed (only for temporary window)
     private var cleanupTask: DispatchWorkItem?
     
-    // No Core Animation, just plain NSView drawing
     deinit {
-        // Make sure we clean up when this object is deallocated
         cancelScheduledCleanup()
         closeTemporaryWindow()
     }
@@ -158,9 +155,6 @@ class OverlayManager: ObservableObject {
             return
         }
         print("[drawAnnotation] Starting annotation draw. Target: \(targetBundleID), Activate: \(activateTargetApp), Bypass Focus: \(bypassFocusCheck), Rel Pos: (\(x), \(y)), Size: (\(width), \(height))")
-        
-        // Clean up existing window and scheduled cleanups
-        cleanupEverything()
         
         // --- Always check Accessibility Permissions --- 
         print("[drawAnnotation] Checking Accessibility Permissions.")
@@ -264,93 +258,63 @@ class OverlayManager: ObservableObject {
         }
     }
     
-    // Absolute minimal, safest drawing function - now handles persistent windows
+    // Absolute minimal, safest drawing function - now uses view controllers
     internal func justDrawRectangle(screen targetScreen: NSScreen, x: CGFloat, y: CGFloat, width: CGFloat, height: CGFloat, 
                                    id: String? = nil, persistent: Bool = false, 
                                    strokeColor: NSColor = .green, fillColor: NSColor = .green.withAlphaComponent(0.3)) {
         // Sanity check for main thread
         if !Thread.isMainThread {
-             print("[justDrawRectangle] Warning: Not on main thread. Dispatching asynchronously.")
+            print("[justDrawRectangle] Warning: Not on main thread. Dispatching asynchronously.")
             DispatchQueue.main.async {
                 self.justDrawRectangle(screen: targetScreen, x: x, y: y, width: width, height: height, 
                                        id: id, persistent: persistent, strokeColor: strokeColor, fillColor: fillColor)
             }
             return
         }
-        let mode = persistent ? "persistent (id: \(id ?? "nil"))" : "temporary"
-        print("[justDrawRectangle] Drawing \(mode) on screen: \(targetScreen.localizedName) at global coords: (\(x), \(y)), Size: (\(width), \(height))")
         
-        // Close ONLY the temporary window if drawing a new temporary one
+        // First, close any existing temporary window if drawing a new temporary
         if !persistent {
             closeTemporaryWindow()
-        } else if let regionId = id, persistentWindows[regionId] != nil {
+        } else if let regionId = id, persistentViewControllers[regionId] != nil {
             // If drawing persistent and ID already exists, remove the old one first
             print("[justDrawRectangle] Persistent window with ID \(regionId) already exists. Closing old one.")
             closePersistentWindow(id: regionId)
         }
         
-        // Use the passed-in target screen
-        print("[justDrawRectangle] Using target screen frame (global): \(targetScreen.frame)")
+        let mode = persistent ? "persistent (id: \(id ?? "nil"))" : "temporary"
+        print("[justDrawRectangle] Drawing \(mode) on screen: \(targetScreen.localizedName) at global coords: (\(x), \(y)), Size: (\(width), \(height))")
         
-        // First close any existing window
-        closeTemporaryWindow()
-        
-        // Create a borderless window using the TARGET screen's frame
-        let newWindow = NSWindow(
-            contentRect: targetScreen.frame, // Use target screen frame
-            styleMask: .borderless,
-            backing: .buffered,
-            defer: true 
-        )
-        
-        // Set window properties
-        newWindow.level = .screenSaver
-        newWindow.backgroundColor = NSColor.clear
-        newWindow.isOpaque = false
-        newWindow.ignoresMouseEvents = true
-        newWindow.hasShadow = false
-        
-        // Ensure window appears on the correct screen, even in fullscreen apps
-        newWindow.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
-        
-        // Coordinate calculation for the view - relative to the window's frame (targetScreen.frame)
-        // (x, y) are global coords (origin top-left of primary screen). 
-        // targetScreen.frame.origin is the global coordinate of the target screen's top-left.
-        // The view needs coordinates relative to the window's contentRect origin (which is targetScreen.frame.origin).
-        // Since RectangleView is flipped (top-left origin), we translate global (x,y) to be relative to the target screen's top-left.
+        // Calculate view coordinates (relative to screen)
         let viewX = x - targetScreen.frame.origin.x
         let viewY = y - targetScreen.frame.origin.y
-
         let rectangleForView = CGRect(x: viewX, y: viewY, width: width, height: height)
-        print("[justDrawRectangle] Creating RectangleView with window frame origin: \(targetScreen.frame.origin), size: \(targetScreen.frame.size). Rectangle frame relative to window: \(rectangleForView)")
         
-        // Create the view with a frame size matching the window (target screen) and specified colors
-        let customView = RectangleView(frame: NSRect(origin: .zero, size: targetScreen.frame.size), 
-                                       rectangleFrame: rectangleForView, 
-                                       strokeColor: strokeColor, 
-                                       fillColor: fillColor)
+        // Create a new ViewController with a RectangleView
+        let viewController = RectangleViewController(
+            screenFrame: targetScreen.frame,
+            rectangle: rectangleForView,
+            strokeColor: strokeColor,
+            fillColor: fillColor
+        )
         
-        // Set the content view
-        newWindow.contentView = customView
-        
-        // Show the window
-        newWindow.orderFrontRegardless()
-        
-        // Store the reference & handle cleanup
+        // Store the controller in the appropriate collection
         if persistent, let regionId = id {
-            print("[justDrawRectangle] Storing persistent window reference for ID: \(regionId)")
-            persistentWindows[regionId] = newWindow
-            // DO NOT schedule cleanup for persistent windows
+            print("[justDrawRectangle] Storing persistent view controller for ID: \(regionId)")
+            persistentViewControllers[regionId] = viewController
         } else {
-            // Assume temporary if not persistent or no ID
-            print("[justDrawRectangle] Storing temporary window reference.")
-            self.temporaryWindowRef = newWindow
-            // Schedule cleanup ONLY for temporary windows
-            scheduleCleanup(delay: 2.0)
+            // Close existing temporary view controller if any
+            temporaryViewController = nil
+            
+            // Store new temporary view controller
+            print("[justDrawRectangle] Storing temporary view controller.")
+            temporaryViewController = viewController
+            
+            // Schedule cleanup for temporary windows
+            scheduleCleanup(delay: 5.0)
         }
         
-        // Log success (original status)
-        print("{\"status\":\"drawn\", \"ts\":\\(Int(Date().timeIntervalSince1970 * 1000))}") 
+        // Log success
+        print("{\"status\":\"drawn\", \"ts\":" + String(Int(Date().timeIntervalSince1970 * 1000)) + "}")
         print("[justDrawRectangle] Window created. Mode: \(mode).")
     }
     
@@ -515,23 +479,18 @@ class OverlayManager: ObservableObject {
             return
         }
 
-        // Check if we have a window reference *before* nilling it
-        if let windowToClose = temporaryWindowRef {
-             print("[closeTemporaryWindow] Preparing to close temporary window.")
-             // Set reference to nil FIRST to prevent concurrent close attempts
-             self.temporaryWindowRef = nil
-
-             // Explicitly remove from screen before closing
-             print("[closeTemporaryWindow] Ordering window out.")
-             windowToClose.orderOut(nil) 
-
-             // Optional: Explicitly remove the content view before closing, might help cleanup
-             windowToClose.contentView = nil
-             print("[closeTemporaryWindow] Closing temporary window.")
-             // Now close the window instance we captured
-             windowToClose.close()
+        if temporaryViewController != nil {
+            print("[closeTemporaryWindow] Releasing temporary view controller.")
+            // First set to nil to break any references
+            temporaryViewController = nil
+            
+            // Signal ready state
+            DispatchQueue.main.async {
+                print("{\"status\":\"ready\", \"ts\":" + String(Int(Date().timeIntervalSince1970 * 1000)) + "}")
+            }
         } else {
-             // print("[closeTemporaryWindow] No temporary window reference to close.")
+            // Still signal ready even if no window to close
+            print("{\"status\":\"ready\", \"ts\":" + String(Int(Date().timeIntervalSince1970 * 1000)) + "}")
         }
     }
     
@@ -546,12 +505,8 @@ class OverlayManager: ObservableObject {
         }
         
         print("[closePersistentWindow] Attempting to close persistent window with ID: \(id)")
-        if let windowToClose = persistentWindows.removeValue(forKey: id) { // Remove from dict
-            print("[closePersistentWindow] Ordering window out.")
-            windowToClose.orderOut(nil)
-            windowToClose.contentView = nil
-            print("[closePersistentWindow] Closing window.")
-            windowToClose.close()
+        if persistentViewControllers.removeValue(forKey: id) != nil {
+            print("[closePersistentWindow] Released persistent view controller for ID: \(id)")
         } else {
             print("[closePersistentWindow] No persistent window found with ID: \(id)")
         }
@@ -571,15 +526,17 @@ class OverlayManager: ObservableObject {
          
         // Cancel any scheduled cleanup for temporary window
         cancelScheduledCleanup()
+        
         // Close the temporary window
-        closeTemporaryWindow()
+        temporaryViewController = nil
         
         // Close all persistent windows
-        let persistentIds = Array(persistentWindows.keys)
+        let persistentIds = Array(persistentViewControllers.keys)
         print("[cleanupEverything] Closing \(persistentIds.count) persistent windows.")
-        for id in persistentIds {
-            closePersistentWindow(id: id)
-        }
+        persistentViewControllers.removeAll()
+        
+        // Signal that cleanup is complete
+        print("{\"status\":\"ready\", \"ts\":" + String(Int(Date().timeIntervalSince1970 * 1000)) + "}")
     }
     
     // Public cleanup method
@@ -589,7 +546,65 @@ class OverlayManager: ObservableObject {
     }
 }
 
-// Custom NSView subclass that draws a rectangle with no Core Animation
+// Custom ViewController to manage window lifecycle
+class RectangleViewController: NSViewController {
+    private var window: NSWindow?
+    
+    init(screenFrame: CGRect, rectangle: CGRect, strokeColor: NSColor = .green, fillColor: NSColor = .green.withAlphaComponent(0.3)) {
+        super.init(nibName: nil, bundle: nil)
+        
+        // Create a custom view
+        let customView = RectangleView(
+            frame: NSRect(origin: .zero, size: screenFrame.size),
+            rectangleFrame: rectangle,
+            strokeColor: strokeColor,
+            fillColor: fillColor
+        )
+        
+        // Set the view
+        self.view = customView
+        
+        // Create a borderless window
+        let window = NSWindow(
+            contentRect: screenFrame,
+            styleMask: .borderless,
+            backing: .buffered,
+            defer: false
+        )
+        
+        // Set window properties
+        window.level = .screenSaver
+        window.backgroundColor = NSColor.clear
+        window.isOpaque = false
+        window.ignoresMouseEvents = true
+        window.hasShadow = false
+        window.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
+        
+        // Set the content view controller
+        window.contentViewController = self
+        
+        // Show the window
+        window.orderFrontRegardless()
+        
+        // Store the window reference
+        self.window = window
+        
+        print("[RectangleViewController] Created with window on screen: \(screenFrame)")
+    }
+    
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+    
+    deinit {
+        print("[RectangleViewController] Deinitializing and closing window")
+        // Close the window when the view controller is deallocated
+        window?.close()
+        window = nil
+    }
+}
+
+// Simplified Rectangle view with no references to its window
 class RectangleView: NSView {
     private var rectangleFrame: CGRect
     private var strokeColor: NSColor
@@ -649,7 +664,6 @@ class RectangleView: NSView {
 
     // Ensure we use flipped coordinates - THIS IS CRITICAL for NSView drawing
     override var isFlipped: Bool {
-        // print("[RectangleView] isFlipped called, returning true.") // Can be noisy, uncomment if needed
         return true // Use top-left origin coordinate system internally for drawing
     }
 }
