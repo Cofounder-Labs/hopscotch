@@ -38,6 +38,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         
         // Subscribe to mode changes - but set up the timer to be invalidated properly
         setupModeChangeObservation()
+        
+        // Show preferences window on launch
+        showPreferences()
     }
     
     func applicationWillTerminate(_ notification: Notification) {
