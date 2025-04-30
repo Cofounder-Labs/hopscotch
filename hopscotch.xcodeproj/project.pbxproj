@@ -23,23 +23,10 @@
 		};
 /* End PBXContainerItemProxy section */
 
-/* Begin PBXCopyFilesBuildPhase section */
-		404383582DC0603000BE36C0 /* CopyFiles */ = {
-			isa = PBXCopyFilesBuildPhase;
-			buildActionMask = 2147483647;
-			dstPath = /usr/share/man/man1/;
-			dstSubfolderSpec = 0;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 1;
-		};
-/* End PBXCopyFilesBuildPhase section */
-
 /* Begin PBXFileReference section */
 		404383132DC05A5300BE36C0 /* hopscotch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = hopscotch.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		404383212DC05A5400BE36C0 /* hopscotchTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = hopscotchTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		4043832B2DC05A5400BE36C0 /* hopscotchUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = hopscotchUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		4043835A2DC0603000BE36C0 /* hoptscotch-cli */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = "hoptscotch-cli"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -82,13 +69,6 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		404383572DC0603000BE36C0 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -108,7 +88,6 @@
 				404383132DC05A5300BE36C0 /* hopscotch.app */,
 				404383212DC05A5400BE36C0 /* hopscotchTests.xctest */,
 				4043832B2DC05A5400BE36C0 /* hopscotchUITests.xctest */,
-				4043835A2DC0603000BE36C0 /* hoptscotch-cli */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -120,6 +99,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 404383352DC05A5400BE36C0 /* Build configuration list for PBXNativeTarget "hopscotch" */;
 			buildPhases = (
+				400C026B2DC1B5A5000CAA7D /* ShellScript */,
 				4043830F2DC05A5300BE36C0 /* Sources */,
 				404383102DC05A5300BE36C0 /* Frameworks */,
 				404383112DC05A5300BE36C0 /* Resources */,
@@ -184,25 +164,6 @@
 			productReference = 4043832B2DC05A5400BE36C0 /* hopscotchUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
-		404383592DC0603000BE36C0 /* hoptscotch-cli */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = 4043835E2DC0603000BE36C0 /* Build configuration list for PBXNativeTarget "hoptscotch-cli" */;
-			buildPhases = (
-				404383562DC0603000BE36C0 /* Sources */,
-				404383572DC0603000BE36C0 /* Frameworks */,
-				404383582DC0603000BE36C0 /* CopyFiles */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-			);
-			name = "hoptscotch-cli";
-			packageProductDependencies = (
-			);
-			productName = "hoptscotch-cli";
-			productReference = 4043835A2DC0603000BE36C0 /* hoptscotch-cli */;
-			productType = "com.apple.product-type.tool";
-		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -224,9 +185,6 @@
 						CreatedOnToolsVersion = 16.3;
 						TestTargetID = 404383122DC05A5300BE36C0;
 					};
-					404383592DC0603000BE36C0 = {
-						CreatedOnToolsVersion = 16.3;
-					};
 				};
 			};
 			buildConfigurationList = 4043830E2DC05A5300BE36C0 /* Build configuration list for PBXProject "hopscotch" */;
@@ -246,7 +204,6 @@
 				404383122DC05A5300BE36C0 /* hopscotch */,
 				404383202DC05A5400BE36C0 /* hopscotchTests */,
 				4043832A2DC05A5400BE36C0 /* hopscotchUITests */,
-				404383592DC0603000BE36C0 /* hoptscotch-cli */,
 			);
 		};
 /* End PBXProject section */
@@ -275,6 +232,26 @@
 		};
 /* End PBXResourcesBuildPhase section */
 
+/* Begin PBXShellScriptBuildPhase section */
+		400C026B2DC1B5A5000CAA7D /* ShellScript */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# Run Script Build Phase\n# Loads environment variables from .env file if it exists\n\nset -e # Exit immediately if a command exits with a non-zero status.\n\nENV_FILE=\"${SRCROOT}/.env\"\n\nif [ -f \"$ENV_FILE\" ]; then\n  echo \"Loading environment variables from ${ENV_FILE}\"\n  # Use 'export $(...)` which handles simple KEY=VALUE pairs, ignoring comments and empty lines\n  # This works well for typical .env files without complex quoting or multi-line values.\n  export $(grep -v '^#' \"$ENV_FILE\" | grep -v '^$' | xargs)\nelse\n  echo \"warning: .env file not found at ${ENV_FILE}. Skipping environment variable loading.\"\nfi\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		4043830F2DC05A5300BE36C0 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -291,13 +268,6 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		404383272DC05A5400BE36C0 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		404383562DC0603000BE36C0 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -552,24 +522,6 @@
 			};
 			name = Release;
 		};
-		4043835F2DC0603000BE36C0 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_STYLE = Automatic;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_VERSION = 5.0;
-			};
-			name = Debug;
-		};
-		404383602DC0603000BE36C0 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_STYLE = Automatic;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_VERSION = 5.0;
-			};
-			name = Release;
-		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -605,15 +557,6 @@
 			buildConfigurations = (
 				4043833C2DC05A5400BE36C0 /* Debug */,
 				4043833D2DC05A5400BE36C0 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
-		4043835E2DC0603000BE36C0 /* Build configuration list for PBXNativeTarget "hoptscotch-cli" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				4043835F2DC0603000BE36C0 /* Debug */,
-				404383602DC0603000BE36C0 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

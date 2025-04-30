@@ -69,7 +69,7 @@
             ActionType = "Xcode.IDEStandardExecutionActionsCore.ExecutionActionType.ShellScriptAction">
             <ActionContent
                title = "Run Script"
-               scriptText = "# Pre-action script for Build Scheme: Reset Accessibility permissions for CoFounder-Labs.hopscotch&#10;tccutil reset Accessibility CoFounder-Labs.hopscotch&#10;">
+               scriptText = "# Pre-action script for Build Scheme: Reset Accessibility permissions for CoFounder-Labs.hopscotch&#10;tccutil reset Accessibility CoFounder-Labs.hopscotch&#10;tccutil reset ScreenRecording CoFounder-Labs.hopscotch&#10;tccutil reset Microphone CoFounder-Labs.hopscotch&#10;">
             </ActionContent>
          </ExecutionAction>
       </PreActions>
@@ -83,13 +83,6 @@
             ReferencedContainer = "container:hopscotch.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
-      <AdditionalOptions>
-         <AdditionalOption
-            key = "NSZombieEnabled"
-            value = "YES"
-            isEnabled = "YES">
-         </AdditionalOption>
-      </AdditionalOptions>
    </LaunchAction>
    <ProfileAction
       buildConfiguration = "Release"

@@ -19,10 +19,14 @@ class AzureOpenAIService {
     init() {
         // For development, you can set values here (REMOVE IN PRODUCTION)
         #if DEBUG
-        self.azureEndpoint = "https://api.openai.com"  // DEVELOPMENT ONLY
-        self.apiKey = "your-key-here"  // DEVELOPMENT ONLY
+        self.azureEndpoint = ProcessInfo.processInfo.environment["AZURE_ENDPOINT"] ?? "https://api.openai.com"
+        // Read API key from environment variable for local development
+        self.apiKey = ProcessInfo.processInfo.environment["AZURE_API_KEY"] ?? ""
         self.apiVersion = "v1"  // For OpenAI API
-        self.model = "gpt-4o"  // Use the model name instead of deploymentId
+        self.model = ProcessInfo.processInfo.environment["OPENAI_MODEL"] ?? "gpt-4o"
+        if apiKey.isEmpty {
+            print("Warning: OPENAI_API_KEY environment variable not set for DEBUG build.")
+        }
         #else
         // For production, use secure storage
         self.azureEndpoint = getSecureConfigValue(forKey: "OPENAI_ENDPOINT") ?? ""
