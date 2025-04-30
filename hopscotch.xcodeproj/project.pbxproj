@@ -99,7 +99,6 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 404383352DC05A5400BE36C0 /* Build configuration list for PBXNativeTarget "hopscotch" */;
 			buildPhases = (
-				400C026B2DC1B5A5000CAA7D /* ShellScript */,
 				4043830F2DC05A5300BE36C0 /* Sources */,
 				404383102DC05A5300BE36C0 /* Frameworks */,
 				404383112DC05A5300BE36C0 /* Resources */,
@@ -231,26 +230,6 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
-
-/* Begin PBXShellScriptBuildPhase section */
-		400C026B2DC1B5A5000CAA7D /* ShellScript */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-			);
-			inputPaths = (
-			);
-			outputFileListPaths = (
-			);
-			outputPaths = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "# Run Script Build Phase\n# Loads environment variables from .env file if it exists\n\nset -e # Exit immediately if a command exits with a non-zero status.\n\nENV_FILE=\"${SRCROOT}/.env\"\n\nif [ -f \"$ENV_FILE\" ]; then\n  echo \"Loading environment variables from ${ENV_FILE}\"\n  # Use 'export $(...)` which handles simple KEY=VALUE pairs, ignoring comments and empty lines\n  # This works well for typical .env files without complex quoting or multi-line values.\n  export $(grep -v '^#' \"$ENV_FILE\" | grep -v '^$' | xargs)\nelse\n  echo \"warning: .env file not found at ${ENV_FILE}. Skipping environment variable loading.\"\nfi\n";
-		};
-/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		4043830F2DC05A5300BE36C0 /* Sources */ = {
