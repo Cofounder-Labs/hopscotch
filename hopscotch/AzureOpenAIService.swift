@@ -29,8 +29,8 @@ class AzureOpenAIService {
         }
         #else
         // For production, use secure storage
-        self.azureEndpoint = getSecureConfigValue(forKey: "OPENAI_ENDPOINT") ?? ""
-        self.apiKey = getSecureConfigValue(forKey: "OPENAI_API_KEY") ?? ""
+        self.azureEndpoint = getSecureConfigValue(forKey: "AZURE_ENDPOINT") ?? ""
+        self.apiKey = getSecureConfigValue(forKey: "AZURE_API_KEY") ?? ""
         self.apiVersion = "v1"  // This doesn't need to be secret
         self.model = getSecureConfigValue(forKey: "OPENAI_MODEL") ?? "gpt-4o"
         #endif
