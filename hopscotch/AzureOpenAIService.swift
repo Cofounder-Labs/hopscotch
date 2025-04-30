@@ -19,20 +19,20 @@ class AzureOpenAIService {
     init() {
         // For development, you can set values here (REMOVE IN PRODUCTION)
         #if DEBUG
-        self.azureEndpoint = ProcessInfo.processInfo.environment["AZURE_ENDPOINT"] ?? "https://api.openai.com"
+        self.azureEndpoint = ProcessInfo.processInfo.environment["ENDPOINT"] ?? "https://api.openai.com"
         // Read API key from environment variable for local development
-        self.apiKey = ProcessInfo.processInfo.environment["AZURE_API_KEY"] ?? ""
+        self.apiKey = ProcessInfo.processInfo.environment["API_KEY"] ?? ""
         self.apiVersion = "v1"  // For OpenAI API
-        self.model = ProcessInfo.processInfo.environment["OPENAI_MODEL"] ?? "gpt-4o"
+        self.model = ProcessInfo.processInfo.environment["MODEL"] ?? "gpt-4o"
         if apiKey.isEmpty {
-            print("Warning: OPENAI_API_KEY environment variable not set for DEBUG build.")
+            print("Warning: API_KEY environment variable not set for DEBUG build.")
         }
         #else
         // For production, use secure storage
-        self.azureEndpoint = getSecureConfigValue(forKey: "AZURE_ENDPOINT") ?? ""
-        self.apiKey = getSecureConfigValue(forKey: "AZURE_API_KEY") ?? ""
+        self.azureEndpoint = getSecureConfigValue(forKey: "ENDPOINT") ?? ""
+        self.apiKey = getSecureConfigValue(forKey: "API_KEY") ?? ""
         self.apiVersion = "v1"  // This doesn't need to be secret
-        self.model = getSecureConfigValue(forKey: "OPENAI_MODEL") ?? "gpt-4o"
+        self.model = getSecureConfigValue(forKey: "MODEL") ?? "gpt-4o"
         #endif
     }
     
@@ -134,6 +134,18 @@ class AzureOpenAIService {
             request.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
             request.httpBody = requestData
             
+            // Log request details for debugging
+            print("--- Sending API Request ---")
+            print("URL: \(request.url?.absoluteString ?? "Invalid URL")")
+            print("Method: \(request.httpMethod ?? "N/A")")
+            print("Headers: \(request.allHTTPHeaderFields ?? [:])")
+            if request.httpBody != nil {
+                print("Body: Set (contains image data)")
+            } else {
+                print("Body: Not set")
+            }
+            print("-------------------------")
+
             // Send the request
             let task = URLSession.shared.dataTask(with: request) { data, response, error in
                 if let error = error {
