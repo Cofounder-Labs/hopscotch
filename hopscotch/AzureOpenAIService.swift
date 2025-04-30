@@ -3,12 +3,20 @@ import Cocoa
 import Vision
 import Security
 
+/// A service that provides access to both OpenAI and Azure OpenAI APIs
 class AzureOpenAIService {
+    // Service Types
+    enum ServiceType {
+        case openAI
+        case azureOpenAI
+    }
+    
     // Configuration
-    private let azureEndpoint: String
+    private let endpoint: String
     private let apiKey: String
     private let apiVersion: String
     private let model: String
+    private let serviceType: ServiceType
     
     // Hardcoded system prompt
     private let systemPrompt = "You are a helpful assistant. Analyze the screenshot and respond to the user's question. Be concise and informative."
@@ -19,26 +27,57 @@ class AzureOpenAIService {
     init() {
         // For development, you can set values here (REMOVE IN PRODUCTION)
         #if DEBUG
-        self.azureEndpoint = ProcessInfo.processInfo.environment["ENDPOINT"] ?? "https://api.openai.com"
+        // Determine if using Azure or OpenAI based on whether ENDPOINT is provided
+        let hasAzureEndpoint = ProcessInfo.processInfo.environment["ENDPOINT"] != nil
+        
+        if hasAzureEndpoint {
+            self.serviceType = .azureOpenAI
+            self.endpoint = ProcessInfo.processInfo.environment["ENDPOINT"]!
+            // For Azure, deployment name is required and typically provided separately
+            self.apiVersion = ProcessInfo.processInfo.environment["API_VERSION"] ?? "2023-05-15"
+        } else {
+            self.serviceType = .openAI
+            self.endpoint = "https://api.openai.com"
+            self.apiVersion = "v1"
+        }
+        
         // Read API key from environment variable for local development
         self.apiKey = ProcessInfo.processInfo.environment["API_KEY"] ?? ""
-        self.apiVersion = "v1"  // For OpenAI API
         self.model = ProcessInfo.processInfo.environment["MODEL"] ?? "gpt-4o"
+        
         if apiKey.isEmpty {
             print("Warning: API_KEY environment variable not set for DEBUG build.")
         }
         #else
         // For production, use secure storage
-        self.azureEndpoint = getSecureConfigValue(forKey: "ENDPOINT") ?? ""
+        if getSecureConfigValue(forKey: "ENDPOINT") != nil {
+            self.serviceType = .azureOpenAI
+            self.endpoint = getSecureConfigValue(forKey: "ENDPOINT")!
+            self.apiVersion = getSecureConfigValue(forKey: "API_VERSION") ?? "2023-05-15"
+        } else {
+            self.serviceType = .openAI
+            self.endpoint = "https://api.openai.com"
+
+            self.apiVersion = "v1"
+        }
+        
         self.apiKey = getSecureConfigValue(forKey: "API_KEY") ?? ""
-        self.apiVersion = "v1"  // This doesn't need to be secret
         self.model = getSecureConfigValue(forKey: "MODEL") ?? "gpt-4o"
         #endif
+        
+        print("Initialized \(serviceType == .azureOpenAI ? "Azure OpenAI" : "OpenAI") service")
     }
     
     /// Validates if all required configuration is set
     var isConfigured: Bool {
-        return !azureEndpoint.isEmpty && !apiKey.isEmpty && !model.isEmpty
+        let baseConfigValid = !endpoint.isEmpty && !apiKey.isEmpty && !model.isEmpty
+        
+        // For Azure, we also need a deployment name
+        if serviceType == .azureOpenAI {
+            return baseConfigValid
+        }
+        
+        return baseConfigValid
     }
     
     /// Securely retrieves a configuration value from the keychain
@@ -81,9 +120,9 @@ class AzureOpenAIService {
         return status == errSecSuccess
     }
     
-    /// Takes a screenshot, combines it with text and sends to OpenAI
+    /// Takes a screenshot, combines it with text and sends to OpenAI or Azure OpenAI
     func sendScreenshotAndText(
-        screenshot: NSImage,
+        screenshot: NSImage, 
         text: String,
         completion: @escaping (Result<String, Error>) -> Void
     ) {
@@ -93,12 +132,25 @@ class AzureOpenAIService {
             return
         }
         
-        // Construct API URL - direct OpenAI API
-        let apiUrl = "\(azureEndpoint)/\(apiVersion)/chat/completions"
+        // Construct API URL based on service type
+        var apiUrl: String
+        var headers: [String: String] = ["Content-Type": "application/json"]
         
-        // Prepare request body
+        switch serviceType {
+        case .openAI:
+            apiUrl = "\(endpoint)/\(apiVersion)/chat/completions"
+            headers["Authorization"] = "Bearer \(apiKey)"
+        
+        case .azureOpenAI:
+            
+            apiUrl = "\(endpoint)/openai/deployments/\(model)/chat/completions?api-version=\(apiVersion)"
+            headers["api-key"] = apiKey
+            
+        }
+        
+        // Prepare request body - same for both services
         let requestBody: [String: Any] = [
-            "model": model,
+            "model": serviceType == .openAI ? model : nil, // Only include model for OpenAI, not for Azure
             "messages": [
                 [
                     "role": "system",
@@ -121,21 +173,30 @@ class AzureOpenAIService {
                 ]
             ],
             "max_tokens": 4000
-        ]
+        ].compactMapValues { $0 } // Remove nil values
         
         do {
             let requestData = try JSONSerialization.data(withJSONObject: requestBody, options: [])
             
             // Create the request
-            var request = URLRequest(url: URL(string: apiUrl)!)
+            guard let url = URL(string: apiUrl) else {
+                completion(.failure(NSError(domain: "AzureOpenAIService", code: 5, userInfo: [NSLocalizedDescriptionKey: "Invalid API URL"])))
+                return
+            }
+            
+            var request = URLRequest(url: url)
             request.httpMethod = "POST"
-            request.addValue("application/json", forHTTPHeaderField: "Content-Type")
-            // Different header key for OpenAI API
-            request.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+            
+            // Add headers
+            for (headerField, value) in headers {
+                request.addValue(value, forHTTPHeaderField: headerField)
+            }
+            
             request.httpBody = requestData
             
             // Log request details for debugging
             print("--- Sending API Request ---")
+            print("Service Type: \(serviceType == .azureOpenAI ? "Azure OpenAI" : "OpenAI")")
             print("URL: \(request.url?.absoluteString ?? "Invalid URL")")
             print("Method: \(request.httpMethod ?? "N/A")")
             print("Headers: \(request.allHTTPHeaderFields ?? [:])")
@@ -153,13 +214,18 @@ class AzureOpenAIService {
                     return
                 }
                 
+                // For debugging, log the response status code
+                if let httpResponse = response as? HTTPURLResponse {
+                    print("Response Status Code: \(httpResponse.statusCode)")
+                }
+                
                 guard let data = data else {
                     completion(.failure(NSError(domain: "AzureOpenAIService", code: 3, userInfo: [NSLocalizedDescriptionKey: "No data received"])))
                     return
                 }
                 
                 do {
-                    // Parse the JSON response
+                    // Parse the JSON response - same structure for both services
                     if let json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
                        let choices = json["choices"] as? [[String: Any]],
                        let firstChoice = choices.first,
@@ -167,9 +233,10 @@ class AzureOpenAIService {
                        let content = message["content"] as? String {
                         completion(.success(content))
                     } else {
-                        // If the expected structure doesn't match, return the raw response
+                        // If the expected structure doesn't match, return the raw response for debugging
                         if let rawResponse = String(data: data, encoding: .utf8) {
-                            completion(.success(rawResponse))
+                            print("Raw API Response: \(rawResponse)")
+                            completion(.success("Failed to parse response: \(rawResponse)"))
                         } else {
                             completion(.failure(NSError(domain: "AzureOpenAIService", code: 4, userInfo: [NSLocalizedDescriptionKey: "Failed to parse response"])))
                         }
