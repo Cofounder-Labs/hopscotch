@@ -8,15 +8,14 @@
 import SwiftUI
 
 struct PreferencesView: View {
-    // Use a direct reference instead of observed object to avoid binding issues
-    let overlayController: OverlayController
+    @ObservedObject var overlayController: OverlayController
     
     // Track mode changes separately to avoid direct binding issues
-    @State private var currentMode: OverlayMode = .none
+    @State private var selectedMode: OverlayMode
+    @State private var selectedTab = 0
     
     // Separate state for log display
     @State private var logs: [String] = []
-    @State private var selectedTab = 0
     
     // Coordinate inputs for drawing mode
     @State private var targetX: String = "0"
@@ -41,9 +40,13 @@ struct PreferencesView: View {
     @State private var screenshotImage: NSImage? = nil
     @State private var isScreenshotLoading: Bool = false
     
+    // AI Analysis
+    @State private var aiAnalysisResult: String = ""
+    @State private var isAnalyzing: Bool = false
+    
     init(overlayController: OverlayController) {
         self.overlayController = overlayController
-        self._currentMode = State(initialValue: overlayController.overlayMode)
+        self._selectedMode = State(initialValue: overlayController.overlayMode)
         self._logs = State(initialValue: overlayController.logs)
     }
     
@@ -88,7 +91,7 @@ struct PreferencesView: View {
         
         // Setup timer to periodically check for mode changes
         modeUpdateTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
-            self.currentMode = self.overlayController.overlayMode
+            self.selectedMode = self.overlayController.overlayMode
             self.logs = self.overlayController.logs
         }
         
@@ -104,7 +107,7 @@ struct PreferencesView: View {
     private var controlsView: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                Text("Current Mode: \(currentMode.displayName)")
+                Text("Current Mode: \(selectedMode.displayName)")
                     .font(.headline)
                     .padding(.bottom, 10)
                 
@@ -121,13 +124,13 @@ struct PreferencesView: View {
                         
                         Button(action: {
                             overlayController.cancelCurrentMode()
-                            currentMode = .none
+                            selectedMode = .none
                         }) {
                             Text("Cancel Active Mode")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
-                        .disabled(currentMode == .none)
+                        .disabled(selectedMode == .none)
                         .padding(.vertical, 8)
                     }
                     
@@ -249,7 +252,7 @@ struct PreferencesView: View {
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(.green)
-                        // .disabled(currentMode == .regionSelect) // Let user define multiple regions if needed
+                        // .disabled(selectedMode == .regionSelect) // Let user define multiple regions if needed
                         .padding(.vertical, 8)
                     }
                     .padding(.bottom, 12)
@@ -296,7 +299,7 @@ struct PreferencesView: View {
                             .font(.headline)
                             .padding(.bottom, 4)
                         
-                        Text("Enter any text below. This is just for reference and doesn't affect the app functionality.")
+                        Text("Enter text to send along with the screenshot to Azure OpenAI for analysis.")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -307,9 +310,40 @@ struct PreferencesView: View {
                             .frame(height: 120)
                             .border(Color.gray.opacity(0.3), width: 1)
                             .cornerRadius(4)
+                        
+                        // Button to analyze with AI
+                        Button(action: {
+                            analyzeWithAI()
+                        }) {
+                            Text("Analyze with Azure OpenAI")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.indigo)
+                        .disabled(screenshotImage == nil || userInputText.isEmpty || isAnalyzing)
+                        .padding(.vertical, 8)
+                        
+                        if isAnalyzing {
+                            ProgressView("Analyzing...")
+                                .padding(.top, 4)
+                        } else if !aiAnalysisResult.isEmpty {
+                            Text("AI Analysis Result:")
+                                .font(.headline)
+                                .padding(.top, 8)
+                            
+                            ScrollView {
+                                Text(aiAnalysisResult)
+                                    .font(.body)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(8)
+                                    .background(Color.gray.opacity(0.1))
+                                    .cornerRadius(4)
+                            }
+                            .frame(height: 200)
+                        }
                     }
                     .padding(.bottom, 12)
-                    
+
                     Spacer()
                 }
             }
@@ -355,7 +389,7 @@ struct PreferencesView: View {
                 // Set UI mode - done after a slight delay to prevent race conditions
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [self] in
                     overlayController.activateMode(.drawing)
-                    currentMode = .drawing
+                    selectedMode = .drawing
                 }
             }
         }
@@ -398,6 +432,31 @@ struct PreferencesView: View {
             DispatchQueue.main.async {
                 self.screenshotImage = image
                 self.isScreenshotLoading = false
+            }
+        }
+    }
+    
+    private func analyzeWithAI() {
+        guard let screenshot = screenshotImage, !userInputText.isEmpty else { return }
+        isAnalyzing = true
+        aiAnalysisResult = ""
+        
+        // Send to Azure OpenAI
+        AzureOpenAIService.shared.sendScreenshotAndText(
+            screenshot: screenshot,
+            text: userInputText
+        ) { result in
+            DispatchQueue.main.async {
+                self.isAnalyzing = false
+                
+                switch result {
+                case .success(let response):
+                    self.aiAnalysisResult = response
+                    self.overlayController.addLog(type: .info, message: "Successfully received AI analysis")
+                case .failure(let error):
+                    self.aiAnalysisResult = "Error: \(error.localizedDescription)"
+                    self.overlayController.addLog(type: .error, message: "Failed to analyze with AI: \(error.localizedDescription)")
+                }
             }
         }
     }

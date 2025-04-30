@@ -106,6 +106,8 @@ class OverlayController: ObservableObject {
                     handleObserveCommand(jsonCommand)
                 case "mode":
                     handleModeCommand(jsonCommand)
+                case "analyze":
+                    handleAnalyzeCommand(jsonCommand)
                 default:
                     handleResponse(response: "{\"error\":\"Unknown command type: \(commandType)\"}")
                 }
@@ -230,6 +232,110 @@ class OverlayController: ObservableObject {
         }
     }
     
+    // Handle Analyze command (for Azure OpenAI integration)
+    private func handleAnalyzeCommand(_ command: [String: Any]) {
+        // Extract parameters
+        guard let params = command["params"] as? [String: Any],
+              let text = params["text"] as? String else {
+            handleResponse(response: "{\"error\":\"Missing required parameters for analyze command\"}")
+            return
+        }
+        
+        // Optional parameters for region (bundle ID instead of CGRect)
+        let targetBundleID = params["targetBundleID"] as? String
+        
+        addLog(type: .info, message: "Sending screenshot and text to Azure OpenAI for analysis")
+        
+        DispatchQueue.main.async {
+            // Take a screenshot of specific app if provided
+            if let bundleID = targetBundleID {
+                // Use existing screenshot functionality
+                self.takeScreenshotOfSelectedApp(bundleID: bundleID) { screenshot in
+                    if let screenshot = screenshot {
+                        self.sendToAzureOpenAI(screenshot: screenshot, text: text)
+                    } else {
+                        self.handleResponse(response: "{\"error\":\"Failed to capture screenshot of target app\"}")
+                        self.addLog(type: .error, message: "Failed to capture screenshot of target app")
+                    }
+                }
+            } else {
+                // No specific target, just use the whole screen
+                self.sendToAzureOpenAI(screenshot: nil, text: text)
+            }
+        }
+    }
+    
+    // Helper method to send to Azure OpenAI
+    private func sendToAzureOpenAI(screenshot: NSImage?, text: String) {
+        // Check if Azure OpenAI service is configured
+        if !AzureOpenAIService.shared.isConfigured {
+            self.handleResponse(response: "{\"error\":\"Azure OpenAI service is not configured.\"}")
+            self.addLog(type: .error, message: "Azure OpenAI service is not configured")
+            return
+        }
+        
+        // Make sure we have a screenshot
+        guard let screenshotImage = screenshot else {
+            // If no screenshot was provided, take one of the entire screen
+            takeFullScreenshot { fullScreenshot in
+                if let fullScreenshot = fullScreenshot {
+                    // Send to Azure OpenAI with the full screen screenshot
+                    self.callAzureOpenAI(screenshot: fullScreenshot, text: text)
+                } else {
+                    self.handleResponse(response: "{\"error\":\"Failed to capture full screen screenshot\"}")
+                    self.addLog(type: .error, message: "Failed to capture full screen screenshot")
+                }
+            }
+            return
+        }
+        
+        // Send to Azure OpenAI with the provided screenshot
+        callAzureOpenAI(screenshot: screenshotImage, text: text)
+    }
+    
+    // Helper method to take a full screen screenshot
+    private func takeFullScreenshot(completion: @escaping (NSImage?) -> Void) {
+        // Use the first running app as a fallback
+        if let frontmostApp = NSWorkspace.shared.frontmostApplication {
+            takeScreenshotOfSelectedApp(bundleID: frontmostApp.bundleIdentifier ?? "com.apple.finder", completion: completion)
+        } else {
+            // In case we can't get any app, fallback to an error
+            completion(nil)
+        }
+    }
+    
+    // Helper method to make the actual Azure OpenAI call
+    private func callAzureOpenAI(screenshot: NSImage, text: String) {
+        // Send to Azure OpenAI
+        AzureOpenAIService.shared.sendScreenshotAndText(
+            screenshot: screenshot,
+            text: text
+        ) { result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let response):
+                    self.handleResponse(response: "{\"status\":\"analyzed\", \"response\":\"\(self.escapeJsonString(response))\"}")
+                    self.addLog(type: .info, message: "Successfully received analysis from Azure OpenAI")
+                case .failure(let error):
+                    self.handleResponse(response: "{\"error\":\"Failed to analyze with Azure OpenAI: \(error.localizedDescription)\"}")
+                    self.addLog(type: .error, message: "Failed to analyze with Azure OpenAI: \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+    
+    // Helper method to escape JSON strings
+    private func escapeJsonString(_ string: String) -> String {
+        let data = string.data(using: .utf8)!
+        let escaped = try! JSONSerialization.data(withJSONObject: [string], options: [])
+        let escapedString = String(data: escaped, encoding: .utf8)!
+        
+        // Remove the surrounding ["..."]
+        let startIndex = escapedString.index(escapedString.startIndex, offsetBy: 2)
+        let endIndex = escapedString.index(escapedString.endIndex, offsetBy: -2)
+        return String(escapedString[startIndex..<endIndex])
+    }
+    
     // Handle command response
     private func handleResponse(response: String) {
         DispatchQueue.main.async {
@@ -240,13 +346,20 @@ class OverlayController: ObservableObject {
     }
     
     // Add log entry
-    private func addLog(type: LogType, message: String) {
+    func addLog(type: LogType, message: String) {
         let log = CommandLog(timestamp: Date(), type: type, message: message)
         DispatchQueue.main.async {
             self.commandLogs.append(log)
-            // Keep only the last 100 logs
+            // Limit logs to keep memory usage reasonable
             if self.commandLogs.count > 100 {
                 self.commandLogs.removeFirst(self.commandLogs.count - 100)
+            }
+            
+            // Add to general logs for PreferencesView
+            self.logs.append("[\(type.rawValue.uppercased())] \(message)")
+            // Limit logs to 100 entries
+            if self.logs.count > 100 {
+                self.logs.removeFirst(self.logs.count - 100)
             }
         }
     }
@@ -354,11 +467,11 @@ class OverlayController: ObservableObject {
 }
 
 // Log types
-enum LogType {
-    case command
-    case response
-    case info
-    case error
+enum LogType: String {
+    case info = "info"
+    case error = "error"
+    case command = "command"
+    case response = "response"
 }
 
 // Command log structure
