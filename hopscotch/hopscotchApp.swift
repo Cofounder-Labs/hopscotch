@@ -12,8 +12,20 @@ struct hopscotchApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     
     var body: some Scene {
+        WindowGroup {
+            // Present the ChatInterface directly
+            ChatInterface(overlayController: appDelegate.overlayController)
+                .edgesIgnoringSafeArea(.all) // Allow the background material to extend
+        }
+        .windowStyle(.hiddenTitleBar) // Keep title bar hidden
+        .windowResizability(.contentSize) // Make window size based on content
+        .defaultPosition(.bottom) // Try to position at bottom-center
+        .commandsRemoved()
+
         Settings {
-            EmptyView()
+            // Keep preferences accessible via menu bar
+            PreferencesView(overlayController: appDelegate.overlayController)
+                .frame(minWidth: 600, minHeight: 500)
         }
     }
 }
@@ -22,8 +34,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private var statusItem: NSStatusItem!
     private var permissionsManager = PermissionsManager()
     
-    // Use a lazy initialization for overlay controller to avoid initialization issues
-    private lazy var overlayController: OverlayController = {
+    // Make overlay controller accessible to the main app
+    lazy var overlayController: OverlayController = {
         let controller = OverlayController()
         return controller
     }()
@@ -39,8 +51,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         // Subscribe to mode changes - but set up the timer to be invalidated properly
         setupModeChangeObservation()
         
-        // Show preferences window on launch
-        showPreferences()
+        // Don't show preferences window on launch - let the chat interface show instead
+        // showPreferences()
     }
     
     func applicationWillTerminate(_ notification: Notification) {
