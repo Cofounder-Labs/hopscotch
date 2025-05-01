@@ -19,7 +19,7 @@ struct ChatInterface: View {
                     }
                     
                     TextField("", text: $inputText, onCommit: sendMessage) // Trigger send on Enter
-                        .textFieldStyle(PlainTextFieldStyle())
+                        .textFieldStyle(PlainTextFieldStyle()) // Ensures transparent background
                         .font(.system(size: 14))
                         .padding(.vertical, 8)
                         .padding(.horizontal, 8)
@@ -52,11 +52,8 @@ struct ChatInterface: View {
         .padding(.horizontal, 16) // Inner horizontal padding
         .padding(.vertical, 10)   // Inner vertical padding
         .padding(.top, 10) // Add padding specifically at the top for window controls
-        .background(
-            VisualEffectView(material: .hudWindow, blendingMode: .behindWindow)
-                .clipShape(RoundedRectangle(cornerRadius: 25, style: .continuous))
-        )
-        .frame(width: 450, height: 95) // Adjusted height slightly for top padding
+        // No explicit background modifier needed here; inherits window background
+        .frame(width: 450, height: 95) // Keep the frame size
     }
     
     private func sendMessage() {
@@ -120,27 +117,8 @@ struct AttachmentOptionsView: View {
     }
 }
 
-// Helper for VisualEffectView
-struct VisualEffectView: NSViewRepresentable {
-    var material: NSVisualEffectView.Material
-    var blendingMode: NSVisualEffectView.BlendingMode
-
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
-        view.material = material
-        view.blendingMode = blendingMode
-        view.state = .active
-        return view
-    }
-
-    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
-        nsView.material = material
-        nsView.blendingMode = blendingMode
-    }
-}
-
-
 #Preview {
     ChatInterface(overlayController: OverlayController())
         .frame(width: 450, height: 95) // Match frame in preview
+        // No outer padding needed in preview
 } 
