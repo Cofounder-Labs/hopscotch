@@ -464,6 +464,15 @@ class OverlayController: ObservableObject {
     func takeScreenshotOfSelectedApp(bundleID: String, completion: @escaping (NSImage?) -> Void) {
         overlayManager.screenshotOfAppWindow(bundleID: bundleID, completion: completion)
     }
+    
+    // Take screenshot of active app
+    func takeScreenshotOfActiveApp(completion: @escaping (NSImage?) -> Void) {
+        if let activeApp = NSWorkspace.shared.frontmostApplication {
+            takeScreenshotOfSelectedApp(bundleID: activeApp.bundleIdentifier ?? "", completion: completion)
+        } else {
+            completion(nil)
+        }
+    }
 }
 
 // Log types
