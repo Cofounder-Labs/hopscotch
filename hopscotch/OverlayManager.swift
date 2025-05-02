@@ -267,13 +267,15 @@ class OverlayManager: ObservableObject {
     // Absolute minimal, safest drawing function - now uses view controllers
     internal func justDrawRectangle(screen targetScreen: NSScreen, x: CGFloat, y: CGFloat, width: CGFloat, height: CGFloat, 
                                    id: String? = nil, persistent: Bool = false, 
-                                   strokeColor: NSColor = .green, fillColor: NSColor = .green.withAlphaComponent(0.3)) {
+                                   strokeColor: NSColor = .green, fillColor: NSColor = .green.withAlphaComponent(0.3),
+                                   annotationText: String? = nil) {
         // Sanity check for main thread
         if !Thread.isMainThread {
             print("[justDrawRectangle] Warning: Not on main thread. Dispatching asynchronously.")
             DispatchQueue.main.async {
                 self.justDrawRectangle(screen: targetScreen, x: x, y: y, width: width, height: height, 
-                                       id: id, persistent: persistent, strokeColor: strokeColor, fillColor: fillColor)
+                                       id: id, persistent: persistent, strokeColor: strokeColor, fillColor: fillColor,
+                                       annotationText: annotationText)
             }
             return
         }
@@ -292,19 +294,21 @@ class OverlayManager: ObservableObject {
         }
         
         let mode = persistent ? "persistent (id: \(id ?? "nil"))" : "temporary"
-        print("[justDrawRectangle] Drawing \(mode) on screen: \(targetScreen.localizedName) at global coords: (\(x), \(y)), Size: (\(width), \(height))")
+        let textLog = annotationText != nil ? " with text: '\(annotationText!)'" : ""
+        print("[justDrawRectangle] Drawing \(mode) on screen: \(targetScreen.localizedName) at global coords: (\(x), \(y)), Size: (\(width), \(height))\(textLog)")
         
         // Calculate view coordinates (relative to screen)
         let viewX = x - targetScreen.frame.origin.x
         let viewY = y - targetScreen.frame.origin.y
         let rectangleForView = CGRect(x: viewX, y: viewY, width: width, height: height)
         
-        // Create a new ViewController with a RectangleView
+        // Create a new ViewController with a RectangleView, passing text
         let viewController = RectangleViewController(
             screenFrame: targetScreen.frame,
             rectangle: rectangleForView,
             strokeColor: strokeColor,
-            fillColor: fillColor
+            fillColor: fillColor,
+            annotationText: annotationText
         )
         
         // Store the controller in the appropriate collection
@@ -717,6 +721,122 @@ class OverlayManager: ObservableObject {
     func screenshotOfAppWindow(bundleID: String) -> NSImage? {
         fatalError("Use the async screenshotOfAppWindow(bundleID:completion:) version instead.")
     }
+
+    // Draws an annotation at a specific rectangle relative to the target app window.
+    func drawAnnotationAtRect(relativeRect: CGRect, annotationText: String?, targetBundleID: String, 
+                             activateTargetApp: Bool, bypassFocusCheck: Bool, completion: @escaping (Bool) -> Void) {
+        // Ensure we're on the main thread
+        guard Thread.isMainThread else {
+            print("[drawAnnotationAtRect] Warning: Not on main thread. Dispatching asynchronously.")
+            DispatchQueue.main.async {
+                self.drawAnnotationAtRect(relativeRect: relativeRect, annotationText: annotationText, targetBundleID: targetBundleID,
+                                          activateTargetApp: activateTargetApp, bypassFocusCheck: bypassFocusCheck, completion: completion)
+            }
+            return
+        }
+        print("[drawAnnotationAtRect] Starting annotation draw. Target: \(targetBundleID), Activate: \(activateTargetApp), Bypass Focus: \(bypassFocusCheck), Rel Rect: \(relativeRect), Text: \(annotationText ?? "None")")
+
+        // --- Always check Accessibility Permissions --- 
+        print("[drawAnnotationAtRect] Checking Accessibility Permissions.")
+        if !checkAccessibilityPermissions() {
+            print("[drawAnnotationAtRect] Error: Accessibility permissions denied or prompt required.")
+            print("Please grant permissions in System Settings > Privacy & Security > Accessibility.")
+             completion(false)
+             return
+         } else {
+            print("[drawAnnotationAtRect] Accessibility permissions granted.")
+         }
+
+        // --- Define the core drawing logic --- 
+        let performRelativeDraw = { [weak self] in
+            guard let self = self else { 
+                print("[performRelativeDraw - AtRect] Error: Self is nil.")
+                completion(false)
+                return
+            }
+            
+            print("[performRelativeDraw - AtRect] Attempting to get window frame for \(targetBundleID).")
+            if let windowFrame = getWindowFrame(for: targetBundleID) {
+                // --- Determine Target Screen --- 
+                print("[performRelativeDraw - AtRect] Finding screen for window frame: \(windowFrame)")
+                guard let targetScreen = findScreen(for: windowFrame) else {
+                    print("[performRelativeDraw - AtRect] Error: findScreen unexpectedly returned nil.") 
+                    completion(false)
+                    return
+                }
+                print("[performRelativeDraw - AtRect] Target screen identified: \(targetScreen.localizedName), Frame (global): \(targetScreen.frame)")
+
+                print("[performRelativeDraw - AtRect] Successfully got window frame (global): \(windowFrame).")
+                
+                // Calculate absolute global coordinates from relative rect
+                let absoluteX = windowFrame.origin.x + relativeRect.origin.x
+                let absoluteY = windowFrame.origin.y + relativeRect.origin.y
+                let absoluteRect = CGRect(x: absoluteX, y: absoluteY, width: relativeRect.width, height: relativeRect.height)
+                print("[performRelativeDraw - AtRect] Calculated absolute coordinates (global): \(absoluteRect)")
+                
+                // Check bounds against the TARGET screen's global frame
+                let screenFrame = targetScreen.frame 
+                print("[performRelativeDraw - AtRect] Target screen frame (global): \(screenFrame). Calculated target rect (global): \(absoluteRect)")
+                
+                // Check if the calculated rect intersects the target screen at all
+                if !absoluteRect.intersects(screenFrame) {
+                     print("[performRelativeDraw - AtRect] Error: Calculated rectangle does not intersect target screen frame. Not drawing.")
+                     completion(false)
+                     return
+                }
+
+                print("[performRelativeDraw - AtRect] Calculated rectangle intersects target screen. Drawing...")
+                // Draw a temporary rectangle with text
+                self.justDrawRectangle(
+                    screen: targetScreen, x: absoluteX, y: absoluteY, 
+                    width: relativeRect.width, height: relativeRect.height,
+                    annotationText: annotationText
+                )
+                completion(true)
+                
+            } else {
+                print("[performRelativeDraw - AtRect] Error: Failed to get window frame for \(targetBundleID). Cannot draw annotation.")
+                completion(false)
+            }
+        }
+
+        // --- Execute based on activateTargetApp --- 
+        if activateTargetApp {
+            print("[drawAnnotationAtRect] Activate flag is true. Finding and activating target app \(targetBundleID).")
+            guard let targetApp = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == targetBundleID }) else {
+                 print("[drawAnnotationAtRect] Error: Target app \(targetBundleID) not found for activation.")
+                 completion(false)
+                 return
+            }
+            targetApp.activate(options: [])
+            
+            // Wait a bit for activation and window focus, then attempt relative draw
+            print("[drawAnnotationAtRect] Scheduling relative draw after 0.5s delay for activation.")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                print("[drawAnnotationAtRect] Activation delay complete. Performing relative draw.")
+                performRelativeDraw()
+            }
+        } else {
+             print("[drawAnnotationAtRect] Activate flag is false. Proceeding with checks and relative draw.")
+             // Validate that the target app is frontmost if not bypassing focus check
+             if !bypassFocusCheck {
+                 print("[drawAnnotationAtRect] Checking if target app \(targetBundleID) is frontmost (bypassFocusCheck is false).")
+                 guard let frontmostApp = NSWorkspace.shared.frontmostApplication,
+                       frontmostApp.bundleIdentifier == targetBundleID else {
+                     print("[drawAnnotationAtRect] Error: Target app \(targetBundleID) is not frontmost. Not drawing.")
+                     completion(false)
+                     return
+                 }
+                 print("[drawAnnotationAtRect] Target app \(targetBundleID) is frontmost.")
+             } else {
+                 print("[drawAnnotationAtRect] Skipping frontmost app check because bypassFocusCheck is true.")
+             }
+
+             // Perform relative draw immediately
+             print("[drawAnnotationAtRect] Performing relative draw immediately.")
+             performRelativeDraw()
+        }
+    }
 }
 
 // Custom ViewController to manage window lifecycle
@@ -724,15 +844,16 @@ class RectangleViewController: NSViewController {
     // Make window property accessible so parent can access it
     var window: NSWindow?
     
-    init(screenFrame: CGRect, rectangle: CGRect, strokeColor: NSColor = .green, fillColor: NSColor = .green.withAlphaComponent(0.3)) {
+    init(screenFrame: CGRect, rectangle: CGRect, strokeColor: NSColor = .green, fillColor: NSColor = .green.withAlphaComponent(0.3), annotationText: String? = nil) {
         super.init(nibName: nil, bundle: nil)
         
-        // Create a custom view
+        // Create a custom view, passing text
         let customView = RectangleView(
             frame: NSRect(origin: .zero, size: screenFrame.size),
             rectangleFrame: rectangle,
             strokeColor: strokeColor,
-            fillColor: fillColor
+            fillColor: fillColor,
+            annotationText: annotationText
         )
         
         // Set the view
@@ -788,14 +909,18 @@ class RectangleView: NSView {
     private var strokeColor: NSColor
     private var fillColor: NSColor
     private var lineWidth: CGFloat
+    private var annotationText: String?
+    private var textColor: NSColor = .white
 
-    init(frame: CGRect, rectangleFrame: CGRect, strokeColor: NSColor = .green, fillColor: NSColor = .green.withAlphaComponent(0.3), lineWidth: CGFloat = 4.0) {
+    init(frame: CGRect, rectangleFrame: CGRect, strokeColor: NSColor = .green, fillColor: NSColor = .green.withAlphaComponent(0.3), lineWidth: CGFloat = 4.0, annotationText: String? = nil) {
         self.rectangleFrame = rectangleFrame
         self.strokeColor = strokeColor
         self.fillColor = fillColor
         self.lineWidth = lineWidth
+        self.annotationText = annotationText
         super.init(frame: frame)
-        print("[RectangleView init] Initialized with frame: \(frame), rectangle: \(rectangleFrame), stroke: \(strokeColor), fill: \(fillColor)")
+        let textLog = annotationText != nil ? " with text: '\(annotationText!)'" : ""
+        print("[RectangleView init] Initialized with frame: \(frame), rectangle: \(rectangleFrame), stroke: \(strokeColor), fill: \(fillColor)\(textLog)")
         // Make the view layer-backed for better rendering
         self.wantsLayer = true
         self.layer?.backgroundColor = NSColor.clear.cgColor // Window is clear, view background too
@@ -807,7 +932,8 @@ class RectangleView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
-        print("[RectangleView draw] Drawing rectangleFrame: \(rectangleFrame) with stroke: \(strokeColor), fill: \(fillColor) within dirtyRect: \(dirtyRect)")
+        let textLog = annotationText != nil ? " with text: '\(annotationText!)'" : ""
+        print("[RectangleView draw] Drawing rectangleFrame: \(rectangleFrame) with stroke: \(strokeColor), fill: \(fillColor)\(textLog) within dirtyRect: \(dirtyRect)")
 
         // Get the current graphics context
         guard let context = NSGraphicsContext.current?.cgContext else { 
@@ -815,28 +941,59 @@ class RectangleView: NSView {
             return 
         }
 
-        // Set up the rectangle fill color
-        context.setFillColor(fillColor.cgColor)
-
-        // Set up the stroke color and width
-        context.setStrokeColor(strokeColor.cgColor)
-        context.setLineWidth(lineWidth)
-
-        // Use bezier path for rounded corners
-        let path = NSBezierPath(roundedRect: rectangleFrame, xRadius: 4, yRadius: 4)
-
-        // Create shadow
+        // Create shadow FIRST, so both rect and text get it
         let shadow = NSShadow()
-        shadow.shadowColor = NSColor.black.withAlphaComponent(0.4)
-        shadow.shadowBlurRadius = 5
+        shadow.shadowColor = NSColor.black.withAlphaComponent(0.5)
+        shadow.shadowBlurRadius = 6
         shadow.shadowOffset = NSSize(width: 2, height: -2)
         shadow.set()
 
-        // Draw with path
-        fillColor.setFill()
-        strokeColor.setStroke()
+        // Draw Rectangle
+        context.saveGState()
+        context.setFillColor(fillColor.cgColor)
+        context.setStrokeColor(strokeColor.cgColor)
+        context.setLineWidth(lineWidth)
+        let path = NSBezierPath(roundedRect: rectangleFrame, xRadius: 4, yRadius: 4)
         path.fill()
         path.stroke()
+        context.restoreGState()
+
+        // Draw Annotation Text if available
+        if let text = annotationText, !text.isEmpty {
+            context.saveGState()
+
+            // Text attributes
+            let paragraphStyle = NSMutableParagraphStyle()
+            paragraphStyle.alignment = .center
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 12, weight: .medium),
+                .foregroundColor: textColor,
+                .paragraphStyle: paragraphStyle,
+                // Add a stroke/outline to the text for better visibility
+                .strokeColor: NSColor.black.withAlphaComponent(0.7), 
+                .strokeWidth: -2.0
+            ]
+
+            // Calculate text position: Centered below the rectangle
+            let textSize = text.size(withAttributes: attributes)
+            let textRect = CGRect(
+                x: rectangleFrame.midX - textSize.width / 2,
+                // Position below the rectangle with some padding
+                y: rectangleFrame.maxY + 5, 
+                width: textSize.width,
+                height: textSize.height
+            )
+            
+            // Apply shadow specifically for text (needed after state restore)
+            shadow.set() 
+
+            // Draw the text
+            print("[RectangleView draw] Drawing text '\(text)' at rect: \(textRect)")
+            (text as NSString).draw(in: textRect, withAttributes: attributes)
+            
+            context.restoreGState()
+        }
+        
         print("[RectangleView draw] Finished drawing.")
     }
 

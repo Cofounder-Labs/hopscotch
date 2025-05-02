@@ -10,6 +10,7 @@ import SwiftUI
 // Observable object to hold test result data
 class TestResultData: ObservableObject {
     @Published var image: NSImage? = nil
+    @Published var prompt: String = ""
     @Published var text: String = ""
 }
 
@@ -34,7 +35,7 @@ struct hopscotchApp: App {
         // New WindowGroup scene for the test result
         WindowGroup(id: "llmTestResultWindow") { 
             // Read data from the environment object
-            TestResultView(image: testResultData.image, resultText: testResultData.text)
+            TestResultView(image: testResultData.image, prompt: testResultData.prompt, resultText: testResultData.text)
                  .environmentObject(testResultData) // Also provide it here if needed by subviews
         }
         .windowResizability(.contentSize)

@@ -2,12 +2,13 @@ import SwiftUI
 
 struct TestResultView: View {
     let image: NSImage?
-    let prompt: String = "What animal is this?" // Store the prompt
+    let prompt: String
     let resultText: String
     @State private var isLoading: Bool
 
-    init(image: NSImage?, resultText: String) {
+    init(image: NSImage?, prompt: String, resultText: String) {
         self.image = image
+        self.prompt = prompt
         self.resultText = resultText
         // Determine loading state based on whether resultText is initially empty
         self._isLoading = State(initialValue: resultText.isEmpty)
@@ -85,19 +86,19 @@ struct TestResultView: View {
 
 // Previews updated to reflect changes
 #Preview("Initial Loading") {
-     TestResultView(image: NSImage(named: "TestConnection"), resultText: "")
+     TestResultView(image: NSImage(named: "TestConnection"), prompt: "What animal is this?", resultText: "")
 }
 
 #Preview("Response Received") {
-    TestResultView(image: NSImage(named: "TestConnection"), resultText: "This appears to be a cat, specifically a domestic shorthair kitten.")
+    TestResultView(image: NSImage(named: "TestConnection"), prompt: "What animal is this?", resultText: "This appears to be a cat, specifically a domestic shorthair kitten.")
 }
 
 #Preview("Image Load Failed") {
-    TestResultView(image: nil, resultText: "Error: Could not load image asset 'TestConnection'.")
+    TestResultView(image: nil, prompt: "What animal is this?", resultText: "Error: Could not load image asset 'TestConnection'.")
 }
 
 #Preview("No Response") {
-     TestResultView(image: NSImage(named: "TestConnection"), resultText: "")
+     TestResultView(image: NSImage(named: "TestConnection"), prompt: "What animal is this?", resultText: "")
      // Simulate loading completion with empty text (error state)
      .onAppear { /* TestResultView's init handles empty resultText as loading, need different state for true 'no response' */ }
 } 

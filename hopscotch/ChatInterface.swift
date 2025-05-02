@@ -1,5 +1,7 @@
 import SwiftUI
 import AppKit
+// Import the main app module if TestResultData is defined there
+// import hopscotchApp // Adjust if necessary
 
 struct ChatInterface: View {
     @ObservedObject var overlayController: OverlayController
@@ -17,6 +19,7 @@ struct ChatInterface: View {
     
     // State for loading indicator during LLM test
     @State private var isTestingLlm = false
+    @State private var isTestingAnnotation = false // State for annotation test loading
     
     // Simplified initializer
     init(overlayController: OverlayController) {
@@ -73,8 +76,8 @@ struct ChatInterface: View {
                          if availableApps.indices.contains(newValue) {
                              let selectedApp = availableApps[newValue]
                              selectedBundleID = selectedApp.bundleIdentifier
-                             // Automatically take screenshot when app is selected
-                             takeScreenshotForSelectedApp()
+                             // Don't automatically take screenshot here anymore
+                             // We will take it when the user performs an action like "Test Annotation"
                          } else {
                              selectedBundleID = nil
                              lastScreenshot = nil // Clear screenshot if selection is invalid
@@ -96,6 +99,19 @@ struct ChatInterface: View {
                 .buttonStyle(PlainButtonStyle())
                 .disabled(isTestingLlm)
                 
+                // LLM Annotation Test Button
+                Button(action: testLlmAnnotation) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "paintbrush.pointed.fill") // Example icon
+                            .font(.system(size: 16, weight: .medium))
+                        Text("Test Annotation")
+                            .font(.system(size: 14))
+                    }
+                    .foregroundColor(isTestingAnnotation ? .secondary : .primary.opacity(0.7)) // Dim if loading
+                }
+                .buttonStyle(PlainButtonStyle())
+                .disabled(isTestingAnnotation)
+                
                 Spacer() // Pushes buttons to the left
             }
             .overlay( // Show progress indicator over the test button when loading
@@ -105,6 +121,11 @@ struct ChatInterface: View {
                              .scaleEffect(0.6) // Make spinner smaller
                              .frame(width: 16, height: 16)
                              .offset(x: 50) // Adjust position relative to the button area
+                     } else if isTestingAnnotation {
+                         ProgressView()
+                             .scaleEffect(0.6)
+                             .frame(width: 16, height: 16)
+                             .offset(x: 150) // Adjust position relative to the annotation test button area (needs tweaking)
                      }
                  }
              )
@@ -165,11 +186,11 @@ struct ChatInterface: View {
                     print("Screenshot attached for \(bundleID)")
                      // TODO: Add better visual indicator for attached screenshot
                 } else {
-                    print("Failed to get screenshot for \(bundleID)")
+                    print("Failed to get screenshot for \(bundleID ?? "<nil bundleID>")")
                     // Clear potentially existing text if screenshot fails
                     if inputText.contains("Screenshot of") && inputText.contains("attached.") {
                          self.inputText = ""
-                     }
+                    }
                 }
             }
         }
@@ -240,11 +261,47 @@ struct ChatInterface: View {
              }
         }
     }
+
+    private func testLlmAnnotation() {
+        // Ensure an app is selected
+        guard let bundleID = selectedBundleID, 
+              availableApps.indices.contains(selectedAppIndex), 
+              let appName = availableApps[selectedAppIndex].localizedName else {
+            print("Error: No valid app selected for annotation test.")
+            // Optionally show an alert to the user
+            return
+        }
+
+        isTestingAnnotation = true
+
+        // Generate the dynamic query
+        let query = "Which button should I click to quit the \(appName) window?"
+
+        // Access the wrapped value of the EnvironmentObject
+        let dataObject = testResultData
+        dataObject.prompt = query
+        dataObject.image = nil // Clear previous image/text
+        dataObject.text = ""  // Set text to empty to indicate loading
+        openWindow(id: "llmTestResultWindow") // Open the window now
+
+        overlayController.performLlmAnnotationTest(
+            targetBundleID: bundleID,
+            appName: appName,
+            initialQuery: query, // Pass the dynamic query
+            testResultData: dataObject, // Pass the actual object
+            openWindow: { _ in /* Window already opened */ } // Pass a dummy closure or handle differently if needed
+        ) { 
+            // Completion handler from OverlayController signals the end of the async operation
+            isTestingAnnotation = false
+        }
+    }
 }
 
 #Preview {
     // Provide environment object for preview
+    // Ensure TestResultData is properly scoped or qualified for the preview
     ChatInterface(overlayController: OverlayController())
-        .environmentObject(TestResultData()) // Add dummy data object
+        // Use the class directly as defined in hopscotchApp.swift
+        .environmentObject(TestResultData()) 
         .frame(width: 450, height: 95) // Match frame in preview
 } 

@@ -473,6 +473,115 @@ class OverlayController: ObservableObject {
             completion(nil)
         }
     }
+    
+    // --- Add function for LLM Annotation Test --- 
+    // Updated to accept target bundle ID and app name
+    func performLlmAnnotationTest(targetBundleID: String, appName: String, initialQuery: String, testResultData: TestResultData, openWindow: @escaping (String) -> Void, completion: @escaping () -> Void) {
+        let aiService: AIServiceProtocol = AzureOpenAIService.shared // Assuming Azure is the implementation
+        
+        addLog(type: .info, message: "Starting LLM annotation test for app: \(appName) (ID: \(targetBundleID)). Query: '\(initialQuery)'")
+        
+        // Check if AI Service is configured
+        guard aiService.isConfigured else {
+            let errorMsg = "AI Service not configured."
+            addLog(type: .error, message: errorMsg)
+            DispatchQueue.main.async {
+                testResultData.image = nil
+                testResultData.text = "Error: \(errorMsg)" // Prompt is set before calling
+                openWindow("llmTestResultWindow")
+                completion()
+            }
+            return
+        }
+        
+        // 1. Take screenshot of the target app
+        takeScreenshotOfSelectedApp(bundleID: targetBundleID) { [weak self] screenshot in
+            guard let self = self else { return }
+            guard let screenshot = screenshot else {
+                let errorMsg = "Failed to capture screenshot of \(appName)."
+                self.addLog(type: .error, message: errorMsg)
+                DispatchQueue.main.async {
+                    // Make sure to clear image in TestResultData on failure too
+                    testResultData.image = nil
+                    // Prompt is already set, update text with error
+                    testResultData.text = "Error: \(errorMsg)"
+                    openWindow("llmTestResultWindow")
+                    completion()
+                }
+                return
+            }
+            
+            // --- Set the image in TestResultData immediately --- 
+            DispatchQueue.main.async {
+                testResultData.image = screenshot
+                // Prompt and empty text are already set by ChatInterface
+            }
+            // --- End Set Image --- 
+            
+            self.addLog(type: .info, message: "\(appName) screenshot captured. Querying AI...")
+            
+            // 2. Call AI Action function
+            // Prepare parameters
+            let chatHistory: [String] = [] // Example: Empty history
+            let boundingBox: CGRect = .zero // Example: Placeholder
+            let openApps = NSWorkspace.shared.runningApplications.compactMap { $0.localizedName } // Get current open apps
+            
+            aiService.getAIAction(
+                appName: appName, // Use dynamic app name
+                userQuery: initialQuery, // Use the dynamic query
+                screenshot: screenshot,
+                chatHistory: chatHistory,
+                boundingBox: boundingBox,
+                openApps: openApps
+            ) { result in
+                DispatchQueue.main.async { // Ensure UI updates and drawing are on main thread
+                    switch result {
+                    case .success(let actionResponse):
+                        switch actionResponse {
+                        case .success(let action):
+                            self.addLog(type: .info, message: "AI Action received: Plan: \(action.plan), Text: \(action.annotationText), Coords: \(action.annotationCoordinates)")
+                            // Update results window (image & prompt already set)
+                            testResultData.text = "Plan:\n\(action.plan)"
+                            // openWindow is called before this closure executes
+                            
+                            // Draw annotation on the target app window
+                            self.overlayManager.drawAnnotationAtRect(
+                                relativeRect: action.annotationCoordinates,
+                                annotationText: action.annotationText,
+                                targetBundleID: targetBundleID, // Use dynamic bundle ID
+                                activateTargetApp: false, // Don't necessarily activate, just draw
+                                bypassFocusCheck: true // Draw even if not focused
+                            ) { success in
+                                if success {
+                                    self.addLog(type: .info, message: "Annotation drawn successfully on \(appName).")
+                                } else {
+                                    self.addLog(type: .error, message: "Failed to draw annotation on \(appName).")
+                                    // Optionally update testResultData text here too
+                                    // testResultData.text += "\n(Failed to draw annotation)"
+                                }
+                                completion() // Signal completion regardless of drawing success
+                            }
+                            
+                        case .retry(let retryInfo):
+                            let msg = "AI suggested retrying with app: \(retryInfo.suggestedApp)"
+                            self.addLog(type: .info, message: msg)
+                            testResultData.text = msg
+                            // openWindow is called before this closure executes
+                            completion()
+                        }
+                        
+                    case .failure(let error):
+                        let errorMsg = "AI Action failed: \(error.localizedDescription)"
+                        self.addLog(type: .error, message: errorMsg)
+                        // Update results window (image & prompt already set)
+                        testResultData.text = "Error: \(errorMsg)"
+                        // openWindow is called before this closure executes
+                        completion()
+                    }
+                } // End DispatchQueue.main.async for AI result
+            } // End aiService.getAIAction completion
+        } // End takeScreenshotOfSelectedApp completion
+    }
 }
 
 // Log types
