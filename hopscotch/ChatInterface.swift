@@ -39,7 +39,7 @@ struct ChatInterface: View {
                             .padding(.leading, 8)
                     }
                     
-                    TextField("", text: $inputText, onCommit: sendMessage) // Trigger send on Enter
+                    TextField("", text: $inputText, onCommit: sendWithNewScreenshot) // Changed to call sendWithNewScreenshot
                         .textFieldStyle(PlainTextFieldStyle()) // Ensures transparent background
                         .font(.system(size: 14))
                         .padding(.vertical, 8)
@@ -154,31 +154,6 @@ struct ChatInterface: View {
         .frame(width: 450, height: 95) // Keep the frame size
         // Load apps when the view appears
         .onAppear(perform: loadRunningApps)
-    }
-    
-    private func sendMessage() {
-        guard !inputText.isEmpty || lastScreenshot != nil else { return }
-        
-        print("Sending message: \(inputText)")
-        if let screenshot = lastScreenshot {
-            print("With screenshot.")
-            AzureOpenAIService.shared.sendScreenshotAndText(screenshot: screenshot, text: inputText) { result in
-                // Handle API result (e.g., show status, clear screenshot)
-                print("API Result: \(result)")
-                DispatchQueue.main.async {
-                    self.lastScreenshot = nil // Clear screenshot after sending
-                }
-            }
-        } else {
-            // Handle text-only message if needed (though focus is on screenshot analysis)
-            print("Sending text only: \(inputText)")
-            // Maybe call a different API endpoint or show a message
-        }
-        
-        // Clear input text after sending/committing
-        DispatchQueue.main.async {
-             self.inputText = ""
-        }
     }
     
     // Renamed and modified to take screenshot of the currently selected app

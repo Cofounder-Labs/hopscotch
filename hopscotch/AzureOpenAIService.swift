@@ -103,7 +103,7 @@ class AzureOpenAIService: AIServiceProtocol {
              print("URL Structure: \(endpoint)/\(apiVersion)/chat/completions")
         }
          print("Model: \(model)")
-         print("API Key: \(apiKey.isEmpty ? "Not set" : "Set (masked)")")
+         
     }
     
     /// Validates if all required configuration is set
@@ -274,7 +274,7 @@ class AzureOpenAIService: AIServiceProtocol {
             print("Service Type: \(serviceType)")
             print("URL: \(request.url?.absoluteString ?? "Invalid URL")")
             print("Method: \(request.httpMethod ?? "N/A")")
-            print("Headers: \(request.allHTTPHeaderFields ?? [:])") // Log all headers
+            
             // Print body only if small/necessary, avoid logging sensitive data like image
             // print("Body: \(String(data: requestData, encoding: .utf8) ?? "Could not decode body")") 
             print("--------------------------------------------------")
@@ -452,7 +452,7 @@ class AzureOpenAIService: AIServiceProtocol {
             print("Service Type: \(serviceType)")
             print("URL: \(request.url?.absoluteString ?? "Invalid URL")")
             print("Method: \(request.httpMethod ?? "N/A")")
-            print("Headers: \(request.allHTTPHeaderFields ?? [:])") // Log all headers
+          
             // Log the body JSON structure (excluding image potentially)
             if let bodyString = String(data: requestData, encoding: .utf8) {
                  // Basic redaction attempt for base64 image data - use standard string escaping
