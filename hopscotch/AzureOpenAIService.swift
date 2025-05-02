@@ -2,9 +2,11 @@ import Foundation
 import Cocoa
 import Vision
 import Security
-import SwiftOpenAI
 
 /// A service that provides access to both OpenAI and Azure OpenAI APIs
+/// Configuration Keys:
+/// - For OpenAI: API_KEY, MODEL (ENDPOINT must NOT be set)
+/// - For Azure OpenAI: ENDPOINT, API_KEY, MODEL (API_VERSION optional, defaults in code)
 class AzureOpenAIService {
     // Service Types
     enum ServiceType {
@@ -18,9 +20,6 @@ class AzureOpenAIService {
     private let apiVersion: String
     private let model: String
     private let serviceType: ServiceType
-    
-    // OpenAI Service (used only for OpenAI, not for Azure)
-    private let openAIService: OpenAIService?
     
     // Hardcoded system prompt
     private let systemPrompt = "You are a helpful assistant. Analyze the screenshot and respond to the user's question. Be concise and informative."
@@ -53,9 +52,9 @@ class AzureOpenAIService {
         }
         #else
         // For production, use secure storage
-        if getSecureConfigValue(forKey: "ENDPOINT") != nil {
+        if let azureEndpoint = getSecureConfigValue(forKey: "ENDPOINT"), !azureEndpoint.isEmpty {
             self.serviceType = .azureOpenAI
-            self.endpoint = getSecureConfigValue(forKey: "ENDPOINT")!
+            self.endpoint = azureEndpoint
             self.apiVersion = getSecureConfigValue(forKey: "API_VERSION") ?? "2023-05-15"
         } else {
             self.serviceType = .openAI
@@ -67,25 +66,16 @@ class AzureOpenAIService {
         self.model = getSecureConfigValue(forKey: "MODEL") ?? "gpt-4o"
         #endif
         
-        // Initialize OpenAI service only for OpenAI (not for Azure)
-        if serviceType == .openAI {
-            openAIService = OpenAIServiceFactory.service(
-                apiKey: apiKey,
-                overrideBaseURL: endpoint,
-                overrideVersion: apiVersion
-            )
-        } else {
-            openAIService = nil
-        }
-        
         print("Initialized \(serviceType == .azureOpenAI ? "Azure OpenAI" : "OpenAI") service")
+        print("Using direct HTTP calls for \(serviceType == .azureOpenAI ? "Azure OpenAI" : "OpenAI")")
+
         if serviceType == .azureOpenAI {
-            print("Using direct HTTP calls for Azure OpenAI")
-            print("URL: \(endpoint)/openai/deployments/\(model)/chat/completions?api-version=\(apiVersion)")
-            print("API Key: \(apiKey.isEmpty ? "Not set" : "Set (masked)")")
+            print("URL Structure: \(endpoint)/openai/deployments/\(model)/chat/completions?api-version=\(apiVersion)")
         } else {
-            print("Using SwiftOpenAI package for OpenAI API")
+             print("URL Structure: \(endpoint)/\(apiVersion)/chat/completions")
         }
+         print("Model: \(model)")
+         print("API Key: \(apiKey.isEmpty ? "Not set" : "Set (masked)")")
     }
     
     /// Validates if all required configuration is set
@@ -146,16 +136,8 @@ class AzureOpenAIService {
             return
         }
         
-        // Use appropriate implementation based on service type
-        switch serviceType {
-        case .openAI:
-            // Use SwiftOpenAI implementation for OpenAI
-            sendViaSwiftOpenAI(base64Image: base64Image, text: text, completion: completion)
-            
-        case .azureOpenAI:
-            // Use direct HTTP implementation for Azure
-            sendViaDirectHTTP(base64Image: base64Image, text: text, completion: completion)
-        }
+        // Use the unified HTTP implementation directly
+        sendViaHTTP(base64Image: base64Image, text: text, completion: completion)
     }
     
     /// For streaming responses - useful for real-time typing effect
@@ -171,177 +153,49 @@ class AzureOpenAIService {
             return
         }
         
-        // Use appropriate implementation based on service type
-        switch serviceType {
-        case .openAI:
-            // Use SwiftOpenAI implementation for OpenAI
-            sendStreamedViaSwiftOpenAI(base64Image: base64Image, text: text, onContent: onContent, onComplete: onComplete)
-            
-        case .azureOpenAI:
-            // For now, Azure streaming is not fully implemented via direct HTTP
-            // Future work would be to implement proper SSE handling
-            sendViaDirectHTTP(base64Image: base64Image, text: text) { result in
-                switch result {
-                case .success(let content):
-                    // Simulate streaming with the full content
-                    onContent(content)
-                    onComplete(.success(()))
-                case .failure(let error):
-                    onComplete(.failure(error))
-                }
+        // TODO: Implement proper HTTP streaming (SSE) for both OpenAI and Azure
+        // For now, using the non-streaming HTTP call and delivering the full content at once.
+        print("Note: Streaming is not yet implemented via direct HTTP. Sending full response.")
+        sendViaHTTP(base64Image: base64Image, text: text) { result in
+            switch result {
+            case .success(let content):
+                // Simulate streaming with the full content
+                onContent(content)
+                onComplete(.success(()))
+            case .failure(let error):
+                onComplete(.failure(error))
             }
         }
     }
     
     // MARK: - Private Methods
     
-    /// Implementation using SwiftOpenAI for standard OpenAI API
-    private func sendViaSwiftOpenAI(
+    /// Implementation using direct HTTP for both Azure OpenAI and standard OpenAI
+    private func sendViaHTTP(
         base64Image: String,
         text: String,
         completion: @escaping (Result<String, Error>) -> Void
     ) {
-        guard let openAIService = openAIService else {
-            completion(.failure(NSError(domain: "AzureOpenAIService", code: 6, userInfo: [NSLocalizedDescriptionKey: "OpenAI Service not initialized"])))
-            return
+        // Construct API URL and headers based on service type
+        let apiUrl: String
+        let headers: [String: String]
+
+        switch serviceType {
+        case .openAI:
+            apiUrl = "\(endpoint)/\(apiVersion)/chat/completions"
+            headers = [
+                "Content-Type": "application/json",
+                "Authorization": "Bearer \(apiKey)"
+            ]
+        case .azureOpenAI:
+            apiUrl = "\(endpoint)/openai/deployments/\(model)/chat/completions?api-version=\(apiVersion)"
+            headers = [
+                "Content-Type": "application/json",
+                "api-key": apiKey
+            ]
         }
-        
-        // Create base64 image URL
-        let imageUrl = URL(string: "data:image/png;base64,\(base64Image)")!
-        
-        // Create message content objects
-        let userMessageContents: [ChatCompletionParameters.Message.ContentType.MessageContent] = [
-            .text(text),
-            .imageUrl(ChatCompletionParameters.Message.ContentType.MessageContent.ImageDetail(url: imageUrl))
-        ]
-        
-        // Create message array
-        let messages: [ChatCompletionParameters.Message] = [
-            .init(role: .system, content: .text(systemPrompt)),
-            .init(role: .user, content: .contentArray(userMessageContents))
-        ]
-        
-        // Create model parameter
-        let modelParam: Model = .custom(model)
-        
-        // Create parameters
-        let parameters = ChatCompletionParameters(
-            messages: messages,
-            model: modelParam,
-            maxTokens: 4000
-        )
-        
-        // Log request details for debugging
-        print("--- Sending API Request via SwiftOpenAI ---")
-        print("Model: \(model)")
-        print("-------------------------")
-        
-        // Use Task to bridge between async/await and completion handler
-        Task {
-            do {
-                let chatCompletion = try await openAIService.startChat(parameters: parameters)
-                if let choices = chatCompletion.choices, 
-                   let firstChoice = choices.first,
-                   let message = firstChoice.message,
-                   let content = message.content {
-                    completion(.success(content))
-                } else {
-                    completion(.failure(NSError(domain: "AzureOpenAIService", code: 4, userInfo: [NSLocalizedDescriptionKey: "No content in response"])))
-                }
-            } catch let apiError as APIError {
-                switch apiError {
-                case .responseUnsuccessful(let description, let statusCode):
-                    print("API Error: \(description), Status Code: \(statusCode)")
-                    completion(.failure(NSError(domain: "AzureOpenAIService", code: 500 + statusCode, userInfo: [NSLocalizedDescriptionKey: description])))
-                default:
-                    completion(.failure(apiError))
-                }
-            } catch {
-                print("Unexpected error: \(error.localizedDescription)")
-                completion(.failure(error))
-            }
-        }
-    }
-    
-    /// Implementation for streaming with SwiftOpenAI
-    private func sendStreamedViaSwiftOpenAI(
-        base64Image: String,
-        text: String,
-        onContent: @escaping (String) -> Void,
-        onComplete: @escaping (Result<Void, Error>) -> Void
-    ) {
-        guard let openAIService = openAIService else {
-            onComplete(.failure(NSError(domain: "AzureOpenAIService", code: 6, userInfo: [NSLocalizedDescriptionKey: "OpenAI Service not initialized"])))
-            return
-        }
-        
-        // Create base64 image URL
-        let imageUrl = URL(string: "data:image/png;base64,\(base64Image)")!
-        
-        // Create message content objects
-        let userMessageContents: [ChatCompletionParameters.Message.ContentType.MessageContent] = [
-            .text(text),
-            .imageUrl(ChatCompletionParameters.Message.ContentType.MessageContent.ImageDetail(url: imageUrl))
-        ]
-        
-        // Create message array
-        let messages: [ChatCompletionParameters.Message] = [
-            .init(role: .system, content: .text(systemPrompt)),
-            .init(role: .user, content: .contentArray(userMessageContents))
-        ]
-        
-        // Create model parameter
-        let modelParam: Model = .custom(model)
-        
-        // Create parameters for streaming
-        let parameters = ChatCompletionParameters(
-            messages: messages,
-            model: modelParam,
-            maxTokens: 4000
-        )
-        
-        // Use Task to bridge between async/await and completion handler
-        Task {
-            do {
-                let stream = try await openAIService.startStreamedChat(parameters: parameters)
-                
-                // Process each chunk as it arrives
-                for try await chunk in stream {
-                    if let choices = chunk.choices, 
-                       let firstChoice = choices.first,
-                       let delta = firstChoice.delta,
-                       let content = delta.content {
-                        onContent(content)
-                    }
-                }
-                
-                onComplete(.success(()))
-            } catch let apiError as APIError {
-                switch apiError {
-                case .responseUnsuccessful(let description, let statusCode):
-                    print("Streaming API Error: \(description), Status Code: \(statusCode)")
-                    onComplete(.failure(NSError(domain: "AzureOpenAIService", code: 500 + statusCode, userInfo: [NSLocalizedDescriptionKey: description])))
-                default:
-                    onComplete(.failure(apiError))
-                }
-            } catch {
-                print("Unexpected streaming error: \(error.localizedDescription)")
-                onComplete(.failure(error))
-            }
-        }
-    }
-    
-    /// Implementation using direct HTTP for Azure OpenAI
-    private func sendViaDirectHTTP(
-        base64Image: String,
-        text: String,
-        completion: @escaping (Result<String, Error>) -> Void
-    ) {
-        // Construct API URL for Azure OpenAI
-        let apiUrl = "\(endpoint)/openai/deployments/\(model)/chat/completions?api-version=\(apiVersion)"
-        let headers = ["Content-Type": "application/json", "api-key": apiKey]
-        
-        // Prepare request body
+
+        // Prepare request body (common structure for both)
         let requestBody: [String: Any] = [
             "messages": [
                 [
@@ -364,9 +218,10 @@ class AzureOpenAIService {
                     ]
                 ]
             ],
-            "max_tokens": 4000
+            "max_tokens": 4000,
+            "model": model // Include model for standard OpenAI API
         ]
-        
+
         do {
             let requestData = try JSONSerialization.data(withJSONObject: requestBody, options: [])
             
@@ -387,7 +242,7 @@ class AzureOpenAIService {
             request.httpBody = requestData
             
             // Log request details for debugging
-            print("--- Sending Direct HTTP Request to Azure OpenAI ---")
+            print("--- Sending Direct HTTP Request to \(serviceType == .azureOpenAI ? "Azure OpenAI" : "OpenAI") ---")
             print("URL: \(request.url?.absoluteString ?? "Invalid URL")")
             print("Method: \(request.httpMethod ?? "N/A")")
    
