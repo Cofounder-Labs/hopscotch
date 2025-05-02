@@ -105,7 +105,7 @@ struct ChatInterface: View {
                     HStack(spacing: 4) {
                         Image(systemName: "paintbrush.pointed.fill") // Example icon
                             .font(.system(size: 16, weight: .medium))
-                        Text("Test Annotation")
+                        Text("Test Anno") // Shortened text
                             .font(.system(size: 14))
                     }
                     .foregroundColor(isTestingAnnotation ? .secondary : .primary.opacity(0.7)) // Dim if loading
@@ -113,6 +113,15 @@ struct ChatInterface: View {
                 .buttonStyle(PlainButtonStyle())
                 .disabled(isTestingAnnotation)
                 
+                // Added Arrow Button (or just icon)
+                Button(action: sendMessage) { // Assuming it triggers the send action
+                     Image(systemName: "arrow.up.circle.fill")
+                         .font(.system(size: 18, weight: .medium)) // Slightly larger
+                         .foregroundColor(.primary.opacity(0.8)) // Adjust color if needed
+                }
+                .buttonStyle(PlainButtonStyle())
+                .disabled(inputText.isEmpty && lastScreenshot == nil) // Disable if nothing to send
+
                 Spacer() // Pushes buttons to the left
             }
             .overlay( // Show progress indicator over the test button when loading
