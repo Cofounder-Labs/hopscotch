@@ -2,6 +2,7 @@ import Foundation
 import Cocoa
 import Vision
 import Security
+import CoreGraphics // Added for CGRect
 
 /// A service that provides access to both OpenAI and Azure OpenAI APIs
 /// Configuration Keys:
@@ -21,8 +22,35 @@ class AzureOpenAIService: AIServiceProtocol {
     private let model: String
     private let serviceType: ServiceType
     
-    // Hardcoded system prompt
-    private let systemPrompt = "You are a helpful assistant. Analyze the screenshot and respond to the user's question. Be concise and informative."
+    // Hardcoded system prompt for simple text/image queries
+    private let simpleSystemPrompt = "You are a helpful assistant. Analyze the screenshot and respond to the user's question. Be concise and informative."
+    
+    // New system prompt for complex action-oriented queries
+    private let actionSystemPrompt = """
+    You are an expert macOS assistant. Your goal is to help the user perform actions within applications based on their query and the provided context (screenshot, active app name, bounding box of interest, open apps, chat history).
+
+    Analyze the user's query, the screenshot, the active application name ('appName'), the list of open applications ('openApps'), the bounding box of the active element ('boundingBox'), and the recent 'chatHistory'.
+
+    Determine if the user's query pertains to the *active* application shown in the screenshot.
+
+    **If the query IS about the active application:**
+    Respond with a JSON object containing:
+    - "responseType": "success"
+    - "annotationCoordinates": { "x": Double, "y": Double, "width": Double, "height": Double } - Coordinates relative to the screenshot (top-left origin) indicating the UI element to interact with. Calculate these based on the screenshot content and the user query's goal.
+    - "annotationText": String - Very short text for the annotation overlay (e.g., "Click here", "Right-click", "Type here").
+    - "plan": String - A concise, numbered step-by-step plan for the user (e.g., "1. Right-click the highlighted button. 2. Select 'Mark as Unread' from the menu.").
+
+    **If the query is NOT about the active application but seems to be about another open application:**
+    Respond with a JSON object containing:
+    - "responseType": "retry"
+    - "suggestedApp": String - The name of the application (from the 'openApps' list if possible) that the query likely refers to.
+
+    **Important:**
+    - Base your coordinate calculations on the visual content of the screenshot.
+    - Ensure the JSON response strictly follows one of the two formats described above.
+    - Be precise and concise in your 'annotationText' and 'plan'.
+    - If unsure, prioritize the 'retry' response with the most likely app.
+    """
     
     // Singleton instance for easy access
     static var shared = AzureOpenAIService()
@@ -200,7 +228,7 @@ class AzureOpenAIService: AIServiceProtocol {
             "messages": [
                 [
                     "role": "system",
-                    "content": systemPrompt
+                    "content": simpleSystemPrompt
                 ],
                 [
                     "role": "user",
@@ -302,5 +330,215 @@ class AzureOpenAIService: AIServiceProtocol {
         guard let pngData = bitmap?.representation(using: .png, properties: [:]) else { return nil }
         
         return pngData.base64EncodedString()
+    }
+    
+    // MARK: - New Method Implementation
+    
+    func getAIAction(
+        appName: String,
+        userQuery: String,
+        screenshot: NSImage,
+        chatHistory: [String],
+        boundingBox: CGRect,
+        openApps: [String],
+        completion: @escaping (Result<AIActionResponse, Error>) -> Void
+    ) {
+        // Convert image to base64
+        guard let base64Image = convertImageToBase64(screenshot) else {
+            completion(.failure(NSError(domain: "AzureOpenAIService", code: 10, userInfo: [NSLocalizedDescriptionKey: "Failed to convert screenshot to base64"])))
+            return
+        }
+        
+        // Call the dedicated HTTP helper for this complex query
+        sendActionRequestViaHTTP(
+            appName: appName,
+            userQuery: userQuery,
+            base64Image: base64Image,
+            chatHistory: chatHistory,
+            boundingBox: boundingBox,
+            openApps: openApps,
+            completion: completion
+        )
+    }
+    
+    /// Sends the complex action request via HTTP and parses the structured response.
+    private func sendActionRequestViaHTTP(
+        appName: String,
+        userQuery: String,
+        base64Image: String,
+        chatHistory: [String],
+        boundingBox: CGRect,
+        openApps: [String],
+        completion: @escaping (Result<AIActionResponse, Error>) -> Void
+    ) {
+        // Construct API URL and headers (same logic as sendViaHTTP)
+        let apiUrl: String
+        let headers: [String: String]
+
+        switch serviceType {
+        case .openAI:
+            apiUrl = "\(endpoint)/\(apiVersion)/chat/completions"
+            headers = [
+                "Content-Type": "application/json",
+                "Authorization": "Bearer \(apiKey)"
+            ]
+        case .azureOpenAI:
+            apiUrl = "\(endpoint)/openai/deployments/\(model)/chat/completions?api-version=\(apiVersion)"
+            headers = [
+                "Content-Type": "application/json",
+                "api-key": apiKey
+            ]
+        }
+
+        // Prepare request body
+        // Combine all context into a structured text prompt for the user role,
+        // supplementing the detailed instructions in the system prompt.
+        let contextText = """
+        User Query: "\(userQuery)"
+        Active Application: \(appName)
+        Active Element Bounding Box (x,y,width,height): (\(boundingBox.origin.x), \(boundingBox.origin.y), \(boundingBox.size.width), \(boundingBox.size.height))
+        Open Applications: \(openApps.joined(separator: ", "))
+        Chat History:
+        \(chatHistory.joined(separator: "\n"))
+        """
+        
+        let requestBody: [String: Any] = [
+            "messages": [
+                [
+                    "role": "system",
+                    "content": actionSystemPrompt // Use the new system prompt
+                ],
+                [
+                    "role": "user",
+                    "content": [
+                        [
+                            "type": "text",
+                            "text": contextText
+                        ],
+                        [
+                            "type": "image_url",
+                            "image_url": [
+                                "url": "data:image/png;base64,\(base64Image)"
+                            ]
+                        ]
+                    ]
+                ]
+            ],
+            "max_tokens": 1000, // Adjust as needed, might need fewer tokens for structured JSON
+            "model": model,
+             // Enforce JSON output if the model/API supports it (check API docs)
+             // Example for OpenAI API (might vary for Azure):
+             "response_format": [ "type": "json_object" ]
+        ]
+
+        do {
+            let requestData = try JSONSerialization.data(withJSONObject: requestBody, options: [.prettyPrinted]) // Pretty print for debug
+            
+            guard let url = URL(string: apiUrl) else {
+                completion(.failure(NSError(domain: "AzureOpenAIService", code: 11, userInfo: [NSLocalizedDescriptionKey: "Invalid API URL for action request"])))
+                return
+            }
+            
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            headers.forEach { request.addValue($1, forHTTPHeaderField: $0) }
+            request.httpBody = requestData
+            
+            // Log request details for debugging
+            print("--- Sending Action Request HTTP ---")
+             print("URL: \(request.url?.absoluteString ?? "Invalid URL")")
+             print("Request Body (JSON):\n\(String(data: requestData, encoding: .utf8) ?? "Could not decode request body")") // Log the body
+            print("---------------------------------")
+
+            let task = URLSession.shared.dataTask(with: request) { data, response, error in
+                if let error = error {
+                    completion(.failure(error))
+                    return
+                }
+                
+                guard let httpResponse = response as? HTTPURLResponse else {
+                     completion(.failure(NSError(domain: "AzureOpenAIService", code: 12, userInfo: [NSLocalizedDescriptionKey: "Invalid HTTP response"])))
+                    return
+                 }
+
+                 print("Action Request Response Status Code: \(httpResponse.statusCode)")
+
+                guard let data = data else {
+                    completion(.failure(NSError(domain: "AzureOpenAIService", code: 13, userInfo: [NSLocalizedDescriptionKey: "No data received for action request"])))
+                    return
+                }
+                 
+                 // Log raw response for debugging
+                 if let rawResponse = String(data: data, encoding: .utf8) {
+                      print("Raw Action API Response: \(rawResponse)")
+                 } else {
+                     print("Could not decode raw action API response")
+                 }
+
+                do {
+                    // Attempt to parse the primary response structure (choices -> message -> content)
+                     guard let jsonResponse = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
+                           let choices = jsonResponse["choices"] as? [[String: Any]],
+                           let firstChoice = choices.first,
+                           let message = firstChoice["message"] as? [String: Any],
+                           let contentString = message["content"] as? String else {
+                         completion(.failure(NSError(domain: "AzureOpenAIService", code: 14, userInfo: [NSLocalizedDescriptionKey: "Failed to parse primary response structure"])))
+                         return
+                     }
+
+                     // Now parse the JSON *within* the content string
+                     guard let contentData = contentString.data(using: .utf8) else {
+                         completion(.failure(NSError(domain: "AzureOpenAIService", code: 15, userInfo: [NSLocalizedDescriptionKey: "Failed to convert content string to data"])))
+                         return
+                     }
+
+                     guard let contentJson = try JSONSerialization.jsonObject(with: contentData, options: []) as? [String: Any] else {
+                         completion(.failure(NSError(domain: "AzureOpenAIService", code: 16, userInfo: [NSLocalizedDescriptionKey: "Failed to parse JSON content string"])))
+                         return
+                     }
+
+                    // Check the responseType
+                    guard let responseType = contentJson["responseType"] as? String else {
+                         completion(.failure(NSError(domain: "AzureOpenAIService", code: 17, userInfo: [NSLocalizedDescriptionKey: "Missing 'responseType' in AI JSON response"])))
+                        return
+                    }
+
+                    if responseType == "success" {
+                        // Parse AISuccessAction
+                         guard let coordsDict = contentJson["annotationCoordinates"] as? [String: Double],
+                               let x = coordsDict["x"], let y = coordsDict["y"],
+                               let width = coordsDict["width"], let height = coordsDict["height"],
+                               let annotationText = contentJson["annotationText"] as? String,
+                               let plan = contentJson["plan"] as? String else {
+                              completion(.failure(NSError(domain: "AzureOpenAIService", code: 18, userInfo: [NSLocalizedDescriptionKey: "Failed to parse 'success' response fields"])))
+                             return
+                         }
+                         let coordinates = CGRect(x: x, y: y, width: width, height: height)
+                         let successAction = AISuccessAction(annotationCoordinates: coordinates, annotationText: annotationText, plan: plan)
+                         completion(.success(.success(successAction)))
+
+                    } else if responseType == "retry" {
+                        // Parse AIRetryAction
+                         guard let suggestedApp = contentJson["suggestedApp"] as? String else {
+                              completion(.failure(NSError(domain: "AzureOpenAIService", code: 19, userInfo: [NSLocalizedDescriptionKey: "Failed to parse 'retry' response fields"])))
+                             return
+                         }
+                         let retryAction = AIRetryAction(suggestedApp: suggestedApp)
+                         completion(.success(.retry(retryAction)))
+                    } else {
+                         completion(.failure(NSError(domain: "AzureOpenAIService", code: 20, userInfo: [NSLocalizedDescriptionKey: "Unknown 'responseType' in AI JSON response: \(responseType)"])))
+                    }
+
+                } catch {
+                     // Catch JSON parsing errors (both primary and content string)
+                    completion(.failure(NSError(domain: "AzureOpenAIService", code: 21, userInfo: [NSLocalizedDescriptionKey: "JSON Parsing Error: \(error.localizedDescription)"])))
+                }
+            }
+            task.resume()
+            
+        } catch {
+            // Catch request body serialization errors
+            completion(.failure(error))
+        }
     }
 } 
