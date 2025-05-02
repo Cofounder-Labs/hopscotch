@@ -7,23 +7,40 @@
 
 import SwiftUI
 
+// Observable object to hold test result data
+class TestResultData: ObservableObject {
+    @Published var image: NSImage? = nil
+    @Published var text: String = ""
+}
+
 @main
 struct hopscotchApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     
+    // Create an instance of the observable object
+    @StateObject private var testResultData = TestResultData()
+    
     var body: some Scene {
         WindowGroup {
-            // Present the ChatInterface directly
+            // Pass the environment object and the openWindow action
             ChatInterface(overlayController: appDelegate.overlayController)
-                .edgesIgnoringSafeArea(.all) // Allow the background material to extend
+                .environmentObject(testResultData) // Inject the data object
         }
-        .windowStyle(.hiddenTitleBar) // Keep title bar hidden
-        .windowResizability(.contentSize) // Make window size based on content
-        .defaultPosition(.bottom) // Try to position at bottom-center
+        .windowStyle(.hiddenTitleBar)
+        .windowResizability(.contentSize)
+        .defaultPosition(.bottom)
         .commandsRemoved()
 
+        // New WindowGroup scene for the test result
+        WindowGroup(id: "llmTestResultWindow") { 
+            // Read data from the environment object
+            TestResultView(image: testResultData.image, resultText: testResultData.text)
+                 .environmentObject(testResultData) // Also provide it here if needed by subviews
+        }
+        .windowResizability(.contentSize)
+        .defaultPosition(.center)
+
         Settings {
-            // Keep preferences accessible via menu bar
             PreferencesView(overlayController: appDelegate.overlayController)
                 .frame(minWidth: 600, minHeight: 500)
         }

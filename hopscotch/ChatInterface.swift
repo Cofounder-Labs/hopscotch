@@ -6,6 +6,18 @@ struct ChatInterface: View {
     @State private var showAttachmentOptions: Bool = false
     @State private var lastScreenshot: NSImage? = nil // Keep for potential future use
     
+    // Access the environment object and openWindow action
+    @EnvironmentObject var testResultData: TestResultData
+    @Environment(\.openWindow) var openWindow
+    
+    // State for loading indicator during LLM test
+    @State private var isTestingLlm = false
+    
+    // Simplified initializer
+    init(overlayController: OverlayController) {
+        self._overlayController = ObservedObject(wrappedValue: overlayController)
+    }
+    
     var body: some View {
         VStack(spacing: 8) { // Main container for text area and button row
             // --- Top Row: Text Input ---
@@ -27,7 +39,7 @@ struct ChatInterface: View {
                 .layoutPriority(1) // Allow text field to expand
             }
             
-            // --- Bottom Row: Attach Button ---
+            // --- Bottom Row: Attach & Test Buttons ---
             HStack(spacing: 16) { 
                 // Plus button & "Attach" Text
                 Button(action: {
@@ -46,8 +58,31 @@ struct ChatInterface: View {
                     AttachmentOptionsView(onScreenshot: takeScreenshot)
                 }
                 
-                Spacer() // Pushes attach button to the left
+                // LLM Test Button
+                Button(action: testLlmConnection) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "network.badge.shield.half.filled") // Example icon
+                            .font(.system(size: 16, weight: .medium))
+                        Text("Test LLM")
+                            .font(.system(size: 14))
+                    }
+                     .foregroundColor(isTestingLlm ? .secondary : .primary.opacity(0.7)) // Dim if loading
+                }
+                .buttonStyle(PlainButtonStyle())
+                .disabled(isTestingLlm)
+                
+                Spacer() // Pushes buttons to the left
             }
+            .overlay( // Show progress indicator over the test button when loading
+                 Group {
+                     if isTestingLlm {
+                         ProgressView()
+                             .scaleEffect(0.6) // Make spinner smaller
+                             .frame(width: 16, height: 16)
+                             .offset(x: 50) // Adjust position relative to the button area
+                     }
+                 }
+             )
         }
         .padding(.horizontal, 16) // Inner horizontal padding
         .padding(.vertical, 10)   // Inner vertical padding
@@ -88,10 +123,47 @@ struct ChatInterface: View {
                 self.showAttachmentOptions = false
                 if image != nil {
                     // Update placeholder or give visual cue that screenshot is attached
-                    self.inputText = "" // Optionally clear text
-                     // TODO: Add visual indicator for attached screenshot
+                    self.inputText = "Screenshot attached" // Example placeholder
+                     // TODO: Add better visual indicator for attached screenshot
                 }
             }
+        }
+    }
+    
+    private func testLlmConnection() {
+        isTestingLlm = true
+        let prompt = "What animal is this?"
+        guard let image = NSImage(named: "TestConnection") else {
+             print("Error: Could not load TestConnection image asset.")
+             // Update data object and open window with error
+             testResultData.image = nil
+             testResultData.text = "Error: Could not load image asset 'TestConnection'."
+             openWindow(id: "llmTestResultWindow")
+             isTestingLlm = false
+             return
+        }
+
+        // Update data object for loading state and open the window
+        testResultData.image = image
+        testResultData.text = "" // Empty string indicates loading in TestResultView
+        openWindow(id: "llmTestResultWindow")
+
+        AzureOpenAIService.shared.sendScreenshotAndText(screenshot: image, text: prompt) { result in
+             DispatchQueue.main.async {
+                 isTestingLlm = false
+                 switch result {
+                 case .success(let response):
+                     print("LLM Test Success: \(response)")
+                     // Update the data object with the successful response
+                     testResultData.text = response
+                 case .failure(let error):
+                     print("LLM Test Error: \(error.localizedDescription)")
+                     let errorMessage = "LLM Test Failed: \(error.localizedDescription)"
+                     // Update the data object with the error message
+                     testResultData.text = errorMessage
+                 }
+                 // The window is already open, and TestResultView will react to the change in testResultData
+             }
         }
     }
 }
@@ -118,7 +190,8 @@ struct AttachmentOptionsView: View {
 }
 
 #Preview {
+    // Provide environment object for preview
     ChatInterface(overlayController: OverlayController())
+        .environmentObject(TestResultData()) // Add dummy data object
         .frame(width: 450, height: 95) // Match frame in preview
-        // No outer padding needed in preview
 } 
