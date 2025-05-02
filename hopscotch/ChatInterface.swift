@@ -59,11 +59,12 @@ struct ChatInterface: View {
                      Picker("Select App", selection: $selectedAppIndex) {
                          ForEach(0..<availableApps.count, id: \.self) { index in
                              HStack {
-                                 if let icon = availableApps[index].icon {
-                                     Image(nsImage: icon)
-                                         .resizable()
-                                         .scaledToFit()
-                                         .frame(width: 16, height: 16)
+                                 if let originalIcon = availableApps[index].icon {
+                                     // Resize the NSImage before creating the SwiftUI Image
+                                     let resizedIcon = resizeNSImage(originalIcon, to: CGSize(width: 20, height: 20))
+                                     Image(nsImage: resizedIcon)
+                                         // No frame or aspect ratio needed here as the source image is already sized
+                                         .padding(.trailing, 4)
                                  }
                                  Text(availableApps[index].localizedName ?? "Unknown App")
                              }
@@ -297,6 +298,18 @@ struct ChatInterface: View {
             isTestingAnnotation = false
         }
     }
+}
+
+// Helper function to resize NSImage
+private func resizeNSImage(_ image: NSImage, to size: CGSize) -> NSImage {
+    let newImage = NSImage(size: size)
+    newImage.lockFocus()
+    defer { newImage.unlockFocus() } // Ensure unlockFocus is called even if drawing fails
+    image.draw(in: NSRect(origin: .zero, size: size),
+               from: NSRect(origin: .zero, size: image.size),
+               operation: .sourceOver, // Use .sourceOver for potentially transparent icons
+               fraction: 1.0)
+    return newImage
 }
 
 #Preview {
