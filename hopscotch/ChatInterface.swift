@@ -206,23 +206,32 @@ struct ChatInterface: View {
         // Sort alphabetically by localized name
         availableApps.sort { ($0.localizedName ?? "") < ($1.localizedName ?? "") }
 
+        // --- Start Default Selection Logic --- 
         // Set initial selection and bundle ID if apps are available
         if !availableApps.isEmpty {
-             // Try to find Finder or the first app
-             if let finderIndex = availableApps.firstIndex(where: { $0.bundleIdentifier == "com.apple.finder" }) {
-                 selectedAppIndex = finderIndex
-             } else {
-                 selectedAppIndex = 0 // Default to the first app if Finder isn't running/found
-             }
-             
-             if availableApps.indices.contains(selectedAppIndex) {
-                 selectedBundleID = availableApps[selectedAppIndex].bundleIdentifier
-                 // Optionally take an initial screenshot? Might be too eager.
-                 // takeScreenshotForSelectedApp()
-             }
-         } else {
-             selectedBundleID = nil // No apps available
-         }
+            // Prioritize Xcode if running
+            if let xcodeIndex = availableApps.firstIndex(where: { $0.bundleIdentifier == "com.apple.dt.Xcode" }) {
+                selectedAppIndex = xcodeIndex
+            // Then try Finder
+            } else if let finderIndex = availableApps.firstIndex(where: { $0.bundleIdentifier == "com.apple.finder" }) {
+                selectedAppIndex = finderIndex
+            } else {
+                selectedAppIndex = 0 // Default to the first app if Finder isn't running/found
+            }
+            
+            if availableApps.indices.contains(selectedAppIndex) {
+                selectedBundleID = availableApps[selectedAppIndex].bundleIdentifier
+                // Optionally take an initial screenshot? Might be too eager.
+                // takeScreenshotForSelectedApp()
+            } else {
+                // This case should ideally not happen if availableApps is not empty,
+                // but set to nil just in case.
+                selectedBundleID = nil
+            }
+        } else {
+            selectedBundleID = nil // No apps available
+        }
+        // --- End Default Selection Logic ---
     }
 
     private func testLlmConnection() {
@@ -263,30 +272,23 @@ struct ChatInterface: View {
     }
 
     private func testLlmAnnotation() {
-        // Ensure an app is selected
-        guard let bundleID = selectedBundleID, 
-              availableApps.indices.contains(selectedAppIndex), 
-              let appName = availableApps[selectedAppIndex].localizedName else {
-            print("Error: No valid app selected for annotation test.")
-            // Optionally show an alert to the user
-            return
-        }
-
+        // Hardcode target to Xcode
+        let targetBundleID = "com.apple.dt.Xcode"
+        let targetAppName = "Xcode"
+        let query = "Which button should I click to hide or show the navigator?"
+ 
         isTestingAnnotation = true
-
-        // Generate the dynamic query
-        let query = "Which button should I click to quit the \(appName) window?"
-
+ 
         // Access the wrapped value of the EnvironmentObject
         let dataObject = testResultData
         dataObject.prompt = query
         dataObject.image = nil // Clear previous image/text
         dataObject.text = ""  // Set text to empty to indicate loading
         openWindow(id: "llmTestResultWindow") // Open the window now
-
+ 
         overlayController.performLlmAnnotationTest(
-            targetBundleID: bundleID,
-            appName: appName,
+            targetBundleID: targetBundleID, // Use hardcoded Xcode bundle ID
+            appName: targetAppName, // Use hardcoded Xcode name
             initialQuery: query, // Pass the dynamic query
             testResultData: dataObject, // Pass the actual object
             openWindow: { _ in /* Window already opened */ } // Pass a dummy closure or handle differently if needed

@@ -86,19 +86,19 @@ struct TestResultView: View {
 
 // Previews updated to reflect changes
 #Preview("Initial Loading") {
-     TestResultView(image: NSImage(named: "TestConnection"), prompt: "What animal is this?", resultText: "")
+     TestResultView(image: NSImage(named: "TestConnection"), prompt: "What button should I click to change the scheme that I building?", resultText: "")
 }
 
 #Preview("Response Received") {
-    TestResultView(image: NSImage(named: "TestConnection"), prompt: "What animal is this?", resultText: "This appears to be a cat, specifically a domestic shorthair kitten.")
+    TestResultView(image: NSImage(named: "TestConnection"), prompt: "What button should I click to change the scheme that I building?", resultText: "Plan:\n1. Click the scheme selection dropdown near the top center.")
 }
 
 #Preview("Image Load Failed") {
-    TestResultView(image: nil, prompt: "What animal is this?", resultText: "Error: Could not load image asset 'TestConnection'.")
+    TestResultView(image: nil, prompt: "What button should I click to change the scheme that I building?", resultText: "Error: Could not capture screenshot.")
 }
 
 #Preview("No Response") {
-     TestResultView(image: NSImage(named: "TestConnection"), prompt: "What animal is this?", resultText: "")
+     TestResultView(image: NSImage(named: "TestConnection"), prompt: "What button should I click to change the scheme that I building?", resultText: "")
      // Simulate loading completion with empty text (error state)
      .onAppear { /* TestResultView's init handles empty resultText as loading, need different state for true 'no response' */ }
 } 

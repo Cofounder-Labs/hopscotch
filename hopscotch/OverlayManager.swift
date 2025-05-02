@@ -950,11 +950,10 @@ class RectangleView: NSView {
 
         // Draw Rectangle
         context.saveGState()
-        context.setFillColor(fillColor.cgColor)
+        context.setFillColor(NSColor.clear.cgColor)
         context.setStrokeColor(strokeColor.cgColor)
         context.setLineWidth(lineWidth)
-        let path = NSBezierPath(roundedRect: rectangleFrame, xRadius: 4, yRadius: 4)
-        path.fill()
+        let path = NSBezierPath(ovalIn: rectangleFrame)
         path.stroke()
         context.restoreGState()
 
@@ -969,26 +968,40 @@ class RectangleView: NSView {
                 .font: NSFont.systemFont(ofSize: 12, weight: .medium),
                 .foregroundColor: textColor,
                 .paragraphStyle: paragraphStyle,
-                // Add a stroke/outline to the text for better visibility
-                .strokeColor: NSColor.black.withAlphaComponent(0.7), 
-                .strokeWidth: -2.0
+                // Remove stroke now that we have a background
+                // .strokeColor: NSColor.black.withAlphaComponent(0.7), 
+                // .strokeWidth: -2.0
             ]
 
             // Calculate text position: Centered below the rectangle
             let textSize = text.size(withAttributes: attributes)
+            let textPadding: CGFloat = 4 // Padding around the text inside the panel
             let textRect = CGRect(
-                x: rectangleFrame.midX - textSize.width / 2,
-                // Position below the rectangle with some padding
-                y: rectangleFrame.maxY + 5, 
+                x: rectangleFrame.minX, // Align left edge with rectangle's left edge
+                // Position below the rectangle with a bit more padding
+                y: rectangleFrame.maxY + 8, 
                 width: textSize.width,
                 height: textSize.height
             )
             
+            // Calculate background panel rect (slightly larger than text rect)
+            let backgroundPanelRect = CGRect(
+                x: textRect.origin.x - textPadding,
+                y: textRect.origin.y - textPadding,
+                width: textRect.width + (textPadding * 2),
+                height: textRect.height + (textPadding * 2)
+            )
+
             // Apply shadow specifically for text (needed after state restore)
             shadow.set() 
 
-            // Draw the text
-            print("[RectangleView draw] Drawing text '\(text)' at rect: \(textRect)")
+            // Draw the background panel FIRST
+            let panelPath = NSBezierPath(roundedRect: backgroundPanelRect, xRadius: 4, yRadius: 4)
+            NSColor.black.withAlphaComponent(0.7).setFill() // Semi-transparent black
+            panelPath.fill()
+
+            // Draw the text on top of the panel
+            print("[RectangleView draw] Drawing text '\(text)' at rect: \(textRect) over background panel: \(backgroundPanelRect)")
             (text as NSString).draw(in: textRect, withAttributes: attributes)
             
             context.restoreGState()
