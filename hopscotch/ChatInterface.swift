@@ -20,6 +20,7 @@ struct ChatInterface: View {
     // State for loading indicator during LLM test
     @State private var isTestingLlm = false
     @State private var isTestingAnnotation = false // State for annotation test loading
+    @State private var isSendingMessage = false // State for sending message with screenshot
     
     // Simplified initializer
     init(overlayController: OverlayController) {
@@ -113,14 +114,15 @@ struct ChatInterface: View {
                 .buttonStyle(PlainButtonStyle())
                 .disabled(isTestingAnnotation)
                 
-                // Added Arrow Button (or just icon)
-                Button(action: sendMessage) { // Assuming it triggers the send action
+                // Added Arrow Button (sends text + new screenshot)
+                Button(action: sendWithNewScreenshot) { // Changed action
                      Image(systemName: "arrow.up.circle.fill")
                          .font(.system(size: 18, weight: .medium)) // Slightly larger
-                         .foregroundColor(.primary.opacity(0.8)) // Adjust color if needed
+                         .foregroundColor(isSendingMessage ? .secondary : .primary.opacity(0.8)) // Dim if loading
                 }
                 .buttonStyle(PlainButtonStyle())
-                .disabled(inputText.isEmpty && lastScreenshot == nil) // Disable if nothing to send
+                // Disable if sending, or if no app is selected, or if text is empty (optional, decided to allow empty text)
+                .disabled(isSendingMessage || selectedBundleID == nil)
 
                 Spacer() // Pushes buttons to the left
             }
@@ -136,6 +138,11 @@ struct ChatInterface: View {
                              .scaleEffect(0.6)
                              .frame(width: 16, height: 16)
                              .offset(x: 150) // Adjust position relative to the annotation test button area (needs tweaking)
+                     } else if isSendingMessage { // Indicator for arrow button
+                         ProgressView()
+                             .scaleEffect(0.6)
+                             .frame(width: 16, height: 16)
+                             .offset(x: 210) // Approximate position near the arrow button (adjust as needed)
                      }
                  }
              )
@@ -305,6 +312,59 @@ struct ChatInterface: View {
         ) { 
             // Completion handler from OverlayController signals the end of the async operation
             isTestingAnnotation = false
+        }
+    }
+
+    // New function to take screenshot and send
+    private func sendWithNewScreenshot() {
+        guard let bundleID = selectedBundleID, let appName = availableApps.first(where: { $0.bundleIdentifier == bundleID })?.localizedName else {
+            print("No app selected or app name not found.")
+            // Optionally show an alert to the user
+            return
+        }
+
+        let currentText = inputText // Capture text before potential clearing
+        isSendingMessage = true
+
+        print("Taking screenshot for \(appName) (\(bundleID)) and sending with text: \"\(currentText)\"")
+
+        overlayController.takeScreenshotOfSelectedApp(bundleID: bundleID) { image in
+            guard let screenshot = image else {
+                print("Failed to get screenshot for \(appName)")
+                DispatchQueue.main.async {
+                    isSendingMessage = false
+                    // Optionally show an error message in the UI
+                }
+                return
+            }
+
+            // Screenshot successful, now call LLM
+            print("Screenshot captured for \(appName). Sending to LLM...")
+
+            DispatchQueue.main.async {
+                 // Prepare data object and open window for loading state
+                 testResultData.prompt = currentText
+                 testResultData.image = screenshot
+                 testResultData.text = "" // Indicate loading
+                 openWindow(id: "llmTestResultWindow")
+
+                 AzureOpenAIService.shared.sendScreenshotAndText(screenshot: screenshot, text: currentText) { result in
+                      DispatchQueue.main.async {
+                          isSendingMessage = false // Call finished
+                          switch result {
+                          case .success(let response):
+                            //   print("LLM Response received: \(response)")
+                              testResultData.text = response // Update window with response
+                          case .failure(let error):
+                            //   print("LLM Call failed: \(error.localizedDescription)")
+                              let errorMessage = "LLM Request Failed: \(error.localizedDescription)"
+                              testResultData.text = errorMessage // Update window with error
+                          }
+                          // Clear input text after successful send or failure
+                          self.inputText = ""
+                      }
+                 }
+            }
         }
     }
 }

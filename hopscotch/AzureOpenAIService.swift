@@ -270,11 +270,14 @@ class AzureOpenAIService: AIServiceProtocol {
             request.httpBody = requestData
             
             // Log request details for debugging
-            print("--- Sending Direct HTTP Request to \(serviceType == .azureOpenAI ? "Azure OpenAI" : "OpenAI") ---")
+            print("--- Sending Direct HTTP Request (sendViaHTTP) ---")
+            print("Service Type: \(serviceType)")
             print("URL: \(request.url?.absoluteString ?? "Invalid URL")")
             print("Method: \(request.httpMethod ?? "N/A")")
-   
-            print("-------------------------")
+            print("Headers: \(request.allHTTPHeaderFields ?? [:])") // Log all headers
+            // Print body only if small/necessary, avoid logging sensitive data like image
+            // print("Body: \(String(data: requestData, encoding: .utf8) ?? "Could not decode body")") 
+            print("--------------------------------------------------")
 
             // Send the request
             let task = URLSession.shared.dataTask(with: request) { data, response, error in
@@ -445,10 +448,22 @@ class AzureOpenAIService: AIServiceProtocol {
             request.httpBody = requestData
             
             // Log request details for debugging
-            print("--- Sending Action Request HTTP ---")
-             print("URL: \(request.url?.absoluteString ?? "Invalid URL")")
-             print("Request Body (JSON):\n\(String(data: requestData, encoding: .utf8) ?? "Could not decode request body")") // Log the body
-            print("---------------------------------")
+            print("--- Sending Action Request HTTP (sendActionRequestViaHTTP) ---")
+            print("Service Type: \(serviceType)")
+            print("URL: \(request.url?.absoluteString ?? "Invalid URL")")
+            print("Method: \(request.httpMethod ?? "N/A")")
+            print("Headers: \(request.allHTTPHeaderFields ?? [:])") // Log all headers
+            // Log the body JSON structure (excluding image potentially)
+            if let bodyString = String(data: requestData, encoding: .utf8) {
+                 // Basic redaction attempt for base64 image data - use standard string escaping
+                 let regexPattern = "\"url\": \"data:image/png;base64,[^\\\"\\}]*\"" // Correctly escaped regex
+                 let replacement = "\"url\": \"data:image/png;base64,<REDACTED>\""
+                 let redactedBody = bodyString.replacingOccurrences(of: regexPattern, with: replacement, options: .regularExpression)
+                 print("Request Body (JSON):\n\(redactedBody)")
+             } else {
+                 print("Could not decode request body")
+             }
+            print("-----------------------------------------------------------")
 
             let task = URLSession.shared.dataTask(with: request) { data, response, error in
                 if let error = error {
