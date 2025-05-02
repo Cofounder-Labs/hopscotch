@@ -7,7 +7,7 @@ import Security
 /// Configuration Keys:
 /// - For OpenAI: API_KEY, MODEL (ENDPOINT must NOT be set)
 /// - For Azure OpenAI: ENDPOINT, API_KEY, MODEL (API_VERSION optional, defaults in code)
-class AzureOpenAIService {
+class AzureOpenAIService: AIServiceProtocol {
     // Service Types
     enum ServiceType {
         case openAI
