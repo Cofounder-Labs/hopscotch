@@ -4,7 +4,7 @@ Mac assistant that lets you ask questions about any app and gives interactive, o
 
 ## Demo
 
-[![Watch the video](https://img.youtube.com/vi/jXd-Ol5tb3M/0.jpg)](https://youtu.be/jXd-Ol5tb3M)
+![Demo](Demo.gif)
 
 
 ## System Requirements
