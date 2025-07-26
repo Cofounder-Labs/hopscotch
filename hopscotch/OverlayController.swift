@@ -8,6 +8,28 @@
 import Foundation
 import Cocoa
 
+// Command log structure
+struct CommandLog: Identifiable {
+    let id = UUID()
+    let timestamp: Date
+    let type: LogType
+    let message: String
+    
+    var formattedTimestamp: String {
+        let formatter = DateFormatter()
+        formatter.timeStyle = .medium
+        return formatter.string(from: timestamp)
+    }
+}
+
+// Log types
+enum LogType: String {
+    case info = "info"
+    case error = "error"
+    case command = "command"
+    case response = "response"
+}
+
 // Define the OverlayMode enum for the PreferencesView
 enum OverlayMode {
     case none
@@ -66,6 +88,7 @@ class OverlayController: ObservableObject {
             return // No change needed
         }
         
+        let previousMode = currentMode
         currentMode = mode
         
         switch mode {
@@ -74,6 +97,11 @@ class OverlayController: ObservableObject {
             clickMonitor.startMonitoring()
             addLog(type: .info, message: "Switched to Observe mode")
         case .act:
+            // Only clear overlays when switching FROM observe mode TO act mode
+            // Don't clear when already in act mode or switching from another act-related mode
+            if previousMode == .observe {
+                overlayManager.clearOverlays()
+            }
             clickMonitor.stopMonitoring()
             clickMonitor.clearMonitoredRegions()
             addLog(type: .info, message: "Switched to Act mode")
@@ -326,7 +354,6 @@ class OverlayController: ObservableObject {
     
     // Helper method to escape JSON strings
     private func escapeJsonString(_ string: String) -> String {
-        let data = string.data(using: .utf8)!
         let escaped = try! JSONSerialization.data(withJSONObject: [string], options: [])
         let escapedString = String(data: escaped, encoding: .utf8)!
         
@@ -582,26 +609,16 @@ class OverlayController: ObservableObject {
             } // End aiService.getAIAction completion
         } // End takeScreenshotOfSelectedApp completion
     }
-}
-
-// Log types
-enum LogType: String {
-    case info = "info"
-    case error = "error"
-    case command = "command"
-    case response = "response"
-}
-
-// Command log structure
-struct CommandLog: Identifiable {
-    let id = UUID()
-    let timestamp: Date
-    let type: LogType
-    let message: String
     
-    var formattedTimestamp: String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm:ss.SSS"
-        return formatter.string(from: timestamp)
+    // Public method to draw annotation from coordinates - for use by ChatInterface
+    func drawAnnotationFromCoordinates(relativeRect: CGRect, annotationText: String?, targetBundleID: String, completion: @escaping (Bool) -> Void) {
+        overlayManager.drawAnnotationAtRect(
+            relativeRect: relativeRect,
+            annotationText: annotationText,
+            targetBundleID: targetBundleID,
+            activateTargetApp: false,
+            bypassFocusCheck: true,
+            completion: completion
+        )
     }
 } 

@@ -313,8 +313,22 @@ struct ChatInterface: View {
                 return
             }
 
-            // Screenshot successful, now call LLM
-            print("Screenshot captured for \(appName). Sending to LLM...")
+            // Screenshot successful, now call LLM using the action-oriented approach
+            print("Screenshot captured for \(appName). Sending to LLM for action analysis...")
+
+            let aiService: AIServiceProtocol = AzureOpenAIService.shared
+            
+            // Check if AI Service is configured
+            guard aiService.isConfigured else {
+                DispatchQueue.main.async {
+                    isSendingMessage = false
+                    testResultData.prompt = currentText
+                    testResultData.image = screenshot
+                    testResultData.text = "Error: AI Service not configured."
+                    openWindow(id: "llmTestResultWindow")
+                }
+                return
+            }
 
             DispatchQueue.main.async {
                  // Prepare data object and open window for loading state
@@ -323,21 +337,56 @@ struct ChatInterface: View {
                  testResultData.text = "" // Indicate loading
                  openWindow(id: "llmTestResultWindow")
 
-                 AzureOpenAIService.shared.sendScreenshotAndText(screenshot: screenshot, text: currentText) { result in
-                      DispatchQueue.main.async {
-                          isSendingMessage = false // Call finished
-                          switch result {
-                          case .success(let response):
-                            //   print("LLM Response received: \(response)")
-                              testResultData.text = response // Update window with response
-                          case .failure(let error):
-                            //   print("LLM Call failed: \(error.localizedDescription)")
-                              let errorMessage = "LLM Request Failed: \(error.localizedDescription)"
-                              testResultData.text = errorMessage // Update window with error
-                          }
-                          // Clear input text after successful send or failure
-                          self.inputText = ""
-                      }
+                 // Use the action-oriented LLM call like the working test flow
+                 let chatHistory: [String] = []
+                 let boundingBox: CGRect = .zero
+                 let openApps = NSWorkspace.shared.runningApplications.compactMap { $0.localizedName }
+                 
+                 aiService.getAIAction(
+                     appName: appName,
+                     userQuery: currentText,
+                     screenshot: screenshot,
+                     chatHistory: chatHistory,
+                     boundingBox: boundingBox,
+                     openApps: openApps
+                 ) { result in
+                     DispatchQueue.main.async {
+                         isSendingMessage = false // Call finished
+                         switch result {
+                         case .success(let actionResponse):
+                             switch actionResponse {
+                             case .success(let action):
+                                 print("AI Action received: Plan: \(action.plan), Text: \(action.annotationText), Coords: \(action.annotationCoordinates)")
+                                 // Update results window with the plan
+                                 testResultData.text = "Plan:\n\(action.plan)"
+                                 
+                                 // Draw annotation on the target app window like the test flow
+                                 overlayController.drawAnnotationFromCoordinates(
+                                     relativeRect: action.annotationCoordinates,
+                                     annotationText: action.annotationText,
+                                     targetBundleID: bundleID
+                                 ) { success in
+                                     if success {
+                                         print("Annotation drawn successfully on \(appName).")
+                                     } else {
+                                         print("Failed to draw annotation on \(appName).")
+                                     }
+                                 }
+                                 
+                             case .retry(let retryInfo):
+                                 let msg = "AI suggested retrying with app: \(retryInfo.suggestedApp)"
+                                 print(msg)
+                                 testResultData.text = msg
+                             }
+                             
+                         case .failure(let error):
+                             let errorMessage = "AI Action failed: \(error.localizedDescription)"
+                             print(errorMessage)
+                             testResultData.text = "Error: \(errorMessage)"
+                         }
+                         // Clear input text after successful send or failure
+                         self.inputText = ""
+                     }
                  }
             }
         }

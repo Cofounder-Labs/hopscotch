@@ -386,11 +386,12 @@ struct PreferencesView: View {
             DispatchQueue.main.async { [self] in
                 overlayController.processCommand(jsonString)
                 
-                // Set UI mode - done after a slight delay to prevent race conditions
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [self] in
-                    overlayController.activateMode(.drawing)
-                    selectedMode = .drawing
-                }
+                // Remove the redundant mode activation that was clearing the annotation
+                // The handleActCommand already sets the mode correctly
+                // DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [self] in
+                //     overlayController.activateMode(.drawing)
+                //     selectedMode = .drawing
+                // }
             }
         }
     }
